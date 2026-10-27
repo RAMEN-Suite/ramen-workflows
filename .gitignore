@@ -1,0 +1,41 @@
+# See https://docs.github.com/get-started/getting-started-with-git/ignoring-files for more about ignoring files.
+
+# Release artifacts: release.yml writes them in the repository root, so do git-cliff and git archive locally.
+# Anchored to the root on purpose: fixture projects may need such files committed.
+/*.tar.gz
+/*.intoto.jsonl
+/RELEASE_NOTES.md
+/cliff-context.json
+/assets/
+
+# Scan results when running zizmor, Scorecard or trivy locally
+/*.sarif
+
+# Node (fixture projects)
+node_modules
+npm-debug.log
+
+# Environment files
+.env
+.env.*
+
+# IDEs and editors
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.history/*
+*.sublime-workspace
+*.swp
+*.swo
+*~
+
+# System files
+.DS_Store
+._*
+.Trash-*
+.directory
+.fuse_hidden*
+.nfs*
+Thumbs.db
+desktop.ini
