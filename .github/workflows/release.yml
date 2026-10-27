@@ -1,0 +1,320 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/**"
+      - "actions/**"
+      - "!.github/workflows/release.yml"
+      - "!.github/workflows/zizmor.yml"
+  workflow_dispatch:
+    inputs:
+      release_as:
+        description: "Force a specific version, e.g. 1.0.0. Leave blank for automatic bump."
+        required: false
+        type: string
+      dry_run:
+        description: "Run everything without pushing, attesting or releasing."
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  guard:
+    name: Check trigger
+    if: github.actor != 'ramen-release-bot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Only release from main
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::Releases must run on main, got $GITHUB_REF"
+            exit 1
+          fi
+
+  ci:
+    name: CI
+    needs: [guard]
+    uses: $/.github/workflows/zizmor.yml
+    with:
+      advanced-security: false
+    permissions:
+      contents: read # required for actions/checkout to fetch repo contents if this repo is private
+      security-events: write # zizmor.yml declares it for its code scanning upload (unused here)
+      actions: read # zizmor.yml declares it for upload-sarif in private repos (unused here)
+
+  prepare:
+    name: Version and changelog
+    needs: [ci]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # required for actions/checkout; gh reads releases of this public repo
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      resume: ${{ steps.version.outputs.resume }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # git-cliff needs the history and the tags
+          persist-credentials: false
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Compute the next version
+        uses: docker://ghcr.io/orhun/git-cliff/git-cliff:2.14.2@sha256:1e696a381a1b0366bb6ccbb6bd4e50e73473fda88eab3a757b95e0d0d66c9531
+        with:
+          args: --bump --unreleased --context --output cliff-context.json
+
+      - name: Pick the version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_AS: ${{ inputs.release_as }}
+        run: |
+          SEMVER='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          LATEST=$(git tag --list 'v*' --sort=-v:refname | head -n 1)
+
+          if [ -n "$RELEASE_AS" ]; then
+            if ! [[ "$RELEASE_AS" =~ $SEMVER ]]; then
+              echo "::error::release_as must look like 1.2.3, got '$RELEASE_AS'"
+              exit 1
+            fi
+            if [ -n "$LATEST" ] && [ "$(printf '%s\n%s\n' "${LATEST#v}" "$RELEASE_AS" | sort -V | tail -n 1)" != "$RELEASE_AS" ]; then
+              echo "::error::release_as $RELEASE_AS is not above the latest version ${LATEST#v}"
+              exit 1
+            fi
+            VERSION="$RELEASE_AS"
+          else
+            VERSION=$(jq -r '.[0].version' cliff-context.json)
+            VERSION="${VERSION#v}"
+          fi
+          rm cliff-context.json
+
+          if ! [[ "$VERSION" =~ $SEMVER ]]; then
+            echo "::error::git-cliff returned '$VERSION', not a version"
+            exit 1
+          fi
+
+          RESUME=false
+          if git rev-parse -q --verify "refs/tags/v$VERSION" > /dev/null; then
+            if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+              echo "::error::v$VERSION is already released: nothing to release"
+              exit 1
+            fi
+            echo "::warning::v$VERSION is tagged but has no release: finishing it"
+            RESUME=true
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "resume=$RESUME" >> "$GITHUB_OUTPUT"
+
+      - name: Create a local release commit
+        if: steps.version.outputs.resume != 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git commit --allow-empty -m "chore(release): $VERSION [skip ci]"
+          git tag "v$VERSION"
+
+      - name: Update the changelog
+        if: steps.version.outputs.resume != 'true'
+        uses: docker://ghcr.io/orhun/git-cliff/git-cliff:2.14.2@sha256:1e696a381a1b0366bb6ccbb6bd4e50e73473fda88eab3a757b95e0d0d66c9531
+        with:
+          args: --output CHANGELOG.md
+
+      - name: Upload the changelog
+        if: steps.version.outputs.resume != 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: changelog
+          path: CHANGELOG.md
+          retention-days: 1
+
+  release:
+    name: Release
+    needs: [prepare]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read # checkout only; every write goes through the release App token
+      id-token: write # required for actions/attest-build-provenance to sign with a Sigstore token
+      attestations: write # required to persist the provenance attestation
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      TARBALL: ramen-workflows-v${{ needs.prepare.outputs.version }}.tar.gz
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check the version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::Invalid version '$VERSION' from the prepare job"
+            exit 1
+          fi
+
+          RESUME=false
+          if git rev-parse -q --verify "refs/tags/v$VERSION" > /dev/null; then
+            if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+              echo "::error::v$VERSION is already released"
+              exit 1
+            fi
+            echo "::warning::v$VERSION is tagged but has no release: finishing it"
+            RESUME=true
+          fi
+          echo "RESUME=$RESUME" >> "$GITHUB_ENV"
+
+      - name: Download the changelog
+        if: env.RESUME != 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: changelog
+
+      - name: Commit and tag
+        if: env.RESUME != 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          git commit --allow-empty -m "chore(release): $VERSION [skip ci]"
+          git tag --annotate "v$VERSION" -m "chore(release): $VERSION"
+
+      - name: Extract the release notes
+        run: |
+          git show "v$VERSION:CHANGELOG.md" | awk '
+            /^#{2,3} \[?v?[0-9]+\.[0-9]+\.[0-9]+/ { c++; if (c==2) exit }
+            c==1 { print }
+          ' > RELEASE_NOTES.md
+
+      - name: Pack the source tarball
+        id: pack
+        run: |
+          git archive --format=tar.gz --prefix="ramen-workflows-v${VERSION}/" --output="$TARBALL" "v$VERSION"
+          echo "sha256=$(sha256sum "$TARBALL" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Create an app token # github-actions[bot] cannot bypass the main and v-tags rulesets, the release App can
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.RELEASE_GITHUB_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write # release commit, tag and GitHub release; nothing else
+
+      - name: Push commit and tag
+        if: env.RESUME != 'true' && !inputs.dry_run
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          if ! git push --atomic "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            "HEAD:refs/heads/main" "refs/tags/v$VERSION"; then
+            echo "::error::Push rejected. If main moved during this run, run the Release workflow manually to release the new state."
+            exit 1
+          fi
+
+      - name: Attest build provenance
+        id: provenance
+        if: ${{ !inputs.dry_run }}
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ env.TARBALL }}
+
+      - name: Collect and verify the attestation bundle
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROVENANCE_BUNDLE: ${{ steps.provenance.outputs.bundle-path }}
+        run: |
+          cp "$PROVENANCE_BUNDLE" "${TARBALL}.provenance.intoto.jsonl"
+          gh attestation verify "$TARBALL" \
+            --bundle "${TARBALL}.provenance.intoto.jsonl" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/release.yml" \
+            --source-ref refs/heads/main
+
+      - name: Append the checksum to the release notes
+        env:
+          SHA256: ${{ steps.pack.outputs.sha256 }}
+        run: |
+          {
+            echo "### Source checksum"
+            echo ""
+            echo "\`$TARBALL\`: SHA-256 \`$SHA256\`"
+          } >> RELEASE_NOTES.md
+
+      - name: Create GitHub release
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          gh release create "v${VERSION}" \
+            --verify-tag \
+            --title "v${VERSION}" \
+            --notes-file RELEASE_NOTES.md \
+            "$TARBALL" \
+            "${TARBALL}.provenance.intoto.jsonl"
+
+      - name: Write release summary
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          {
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "## 🧪 Dry run: v${VERSION} (nothing pushed or released)"
+            else
+              echo "## 🚀 Released v${VERSION}"
+            fi
+            echo ""
+            echo "Callers pin: \`uses: ${GITHUB_REPOSITORY}/.github/workflows/<workflow>.yml@$(git rev-parse "v${VERSION}^{commit}") # v${VERSION}\`"
+            echo ""
+            cat RELEASE_NOTES.md
+          } >> "$GITHUB_STEP_SUMMARY"
+  verify:
+    name: Verify the release
+    needs: [prepare, release]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # gh reads the release and downloads its assets
+      attestations: read # gh attestation verify reads this repository's attestations
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      TARBALL: ramen-workflows-v${{ needs.prepare.outputs.version }}.tar.gz
+    steps:
+      - name: Download the published assets
+        run: gh release download "v${VERSION}" --repo "$GITHUB_REPOSITORY" --dir assets
+
+      - name: Verify release, asset and provenance
+        working-directory: assets
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if gh release verify "v${VERSION}" --repo "$GITHUB_REPOSITORY"; then break; fi
+            if [ "$attempt" = 5 ]; then exit 1; fi
+            sleep 10
+          done
+          gh release verify-asset "v${VERSION}" "$TARBALL" --repo "$GITHUB_REPOSITORY"
+          gh attestation verify "$TARBALL" \
+            --bundle "${TARBALL}.provenance.intoto.jsonl" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/release.yml" \
+            --source-ref refs/heads/main
+
+      - name: Write verification summary
+        run: |
+          echo "✅ v${VERSION}: immutable release, asset and build provenance verified" >> "$GITHUB_STEP_SUMMARY"

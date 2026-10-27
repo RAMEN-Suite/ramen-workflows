@@ -40,7 +40,6 @@ commit_preprocessors = [
   { pattern = '\((\w+\s)?#([0-9]+)\)', replace = "([#${2}](https://github.com/RAMEN-Suite/ramen-workflows/issues/${2}))" },
 ]
 commit_parsers = [
-  { message = '^chore\(release\)', skip = true },
   { message = '^feat', group = "Features" },
   { message = '^fix', group = "Bug Fixes" },
   { message = '^perf', group = "Performance" },
