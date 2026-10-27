@@ -1,0 +1,9 @@
+# actionlint 1.7.12 rejects the self-repository syntax `$/` (GA on GitHub since 2026-07-30):
+#   specifying action "$/actions/x" in invalid format because ref is missing
+#   reusable workflow call "$/.github/workflows/x.yml" at "uses" is not following the format ...
+# Remove once actionlint supports `$/` (https://github.com/rhysd/actionlint/issues/732).
+paths:
+  .github/workflows/**/*.{yml,yaml}:
+    ignore:
+      - 'specifying action "\$/'
+      - 'reusable workflow call "\$/'
