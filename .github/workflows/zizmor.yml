@@ -2,9 +2,10 @@ name: GitHub Actions Security Analysis with zizmor 🌈
 
 on:
   push:
-    branches: [main]
+    branches: [main, "renovate/**"]
   pull_request:
     branches: [main]
+  workflow_call:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
