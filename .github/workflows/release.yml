@@ -43,13 +43,13 @@ jobs:
   ci:
     name: CI
     needs: [guard]
-    uses: $/.github/workflows/zizmor.yml
+    uses: $/.github/workflows/actions-lint.yml
     with:
       advanced-security: false
     permissions:
       contents: read # required for actions/checkout to fetch repo contents if this repo is private
-      security-events: write # zizmor.yml declares it for its code scanning upload (unused here)
-      actions: read # zizmor.yml declares it for upload-sarif in private repos (unused here)
+      security-events: write # actions-lint.yml declares it for its code scanning upload
+      actions: read # actions-lint.yml declares it for upload-sarif in private repos
 
   prepare:
     name: Version and changelog
