@@ -8,6 +8,7 @@ on:
       - "actions/**"
       - "!.github/workflows/release.yml"
       - "!.github/workflows/zizmor.yml"
+      - "!.github/workflows/scorecard.yml"
   workflow_dispatch:
     inputs:
       release_as:
