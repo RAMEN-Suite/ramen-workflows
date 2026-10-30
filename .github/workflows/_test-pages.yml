@@ -1,0 +1,27 @@
+name: "Test: Pages"
+
+on:
+  push:
+    branches: [main, "renovate/**"]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  pages:
+    name: "Test: Pages"
+    uses: $/.github/workflows/pages.yml
+    with:
+      working-directory: fixtures/node-lib
+      build-script: build:pages
+      path: dist
+      dry-run: true # this repository has no Pages site: build and upload only
+    permissions:
+      contents: read # required for actions/checkout to fetch repo contents if this repo is private
+      pages: write # pages.yml declares it for its deploy job; GitHub checks it even though dry-run skips that job
+      id-token: write # pages.yml declares it for its deploy job, same reason

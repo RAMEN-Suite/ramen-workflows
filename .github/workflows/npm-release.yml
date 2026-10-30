@@ -1,0 +1,240 @@
+name: npm release
+
+on:
+  workflow_call:
+    inputs:
+      build-script:
+        description: "npm script that builds and checks the package before it is packed"
+        type: string
+        required: true
+      package-dir:
+        description: "Directory that npm pack packs (the built package), relative to the repository root"
+        type: string
+        default: "."
+      extra-assets:
+        description: "More files for the GitHub release, space-separated, relative to the repository root (optional)"
+        type: string
+        default: ""
+      release-as:
+        description: "Force a specific version, e.g. 1.0.0 (passed to commit-and-tag-version --release-as)"
+        type: string
+        default: ""
+      dry-run:
+        description: "Run everything without pushing, attesting or releasing"
+        type: boolean
+        default: false
+    secrets:
+      RELEASE_APP_PRIVATE_KEY:
+        description: "Private key of the release App (its client ID comes from vars.RELEASE_GITHUB_CLIENT_ID)"
+        required: true
+    outputs:
+      version:
+        description: "Released version, without the leading v"
+        value: ${{ jobs.release.outputs.version }}
+      tarball:
+        description: "File name of the npm tarball in the release-artifacts artifact"
+        value: ${{ jobs.release.outputs.tarball }}
+
+permissions: {}
+
+jobs:
+  guard:
+    name: Check branch
+    runs-on: ubuntu-latest
+    steps:
+      - name: Only release from main
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::Releases must run on main, got $GITHUB_REF"
+            exit 1
+          fi
+
+  release:
+    name: Version, build and tag
+    needs: [guard]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read # checkout only; every write goes through the release App token
+      id-token: write # required for actions/attest-build-provenance and actions/attest-sbom to sign with a Sigstore token
+      attestations: write # required to persist the provenance and SBOM attestations
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+      tarball: ${{ steps.pack.outputs.tarball }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # commit-and-tag-version needs the history and the tags
+          persist-credentials: false
+      - name: Setup Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+      - name: Bump version and update changelog
+        id: bump
+        env:
+          RELEASE_AS: ${{ inputs.release-as }}
+        run: |
+          # --no: only the project's own commit-and-tag-version, never a download
+          if [ -n "$RELEASE_AS" ]; then
+            npx --no -- commit-and-tag-version --release-as "$RELEASE_AS"
+          else
+            npx --no -- commit-and-tag-version
+          fi
+
+          TAG=$(git describe --exact-match --tags HEAD)
+          if ! [[ "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::Expected a vX.Y.Z tag on the release commit, got '$TAG'"
+            exit 1
+          fi
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+      - name: Build and check the package
+        env:
+          SCRIPT: ${{ inputs.build-script }}
+        run: npm run "$SCRIPT"
+      - name: Generate SBOM
+        run: npm sbom --sbom-format cyclonedx --omit dev > sbom.cdx.json
+      - name: Pack the tarball
+        id: pack
+        env:
+          PACKAGE_DIR: ${{ inputs.package-dir }}
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          # Without ./ npm reads "dist/pkg" as a GitHub shorthand (owner/repo), not as a directory
+          case "$PACKAGE_DIR" in
+            . | ./* | ../*) ;;
+            *) PACKAGE_DIR="./$PACKAGE_DIR" ;;
+          esac
+          npm pack "$PACKAGE_DIR" --pack-destination . --json > pack.json
+
+          PACKED=$(jq -r '.[0].version' pack.json)
+          if [ "$PACKED" != "$VERSION" ]; then
+            echo "::error::$PACKAGE_DIR packs version $PACKED, but the release is $VERSION."
+            echo "::error::The build script must build from the bumped package.json."
+            exit 1
+          fi
+
+          {
+            echo "tarball=$(jq -r '.[0].filename' pack.json)"
+            echo "shasum=$(jq -r '.[0].shasum' pack.json)"
+            echo "integrity=$(jq -r '.[0].integrity' pack.json)"
+          } >> "$GITHUB_OUTPUT"
+      - name: Collect the release assets
+        env:
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+          EXTRA_ASSETS: ${{ inputs.extra-assets }}
+        run: |
+          mkdir release-assets
+          # shellcheck disable=SC2086 # EXTRA_ASSETS is a space-separated list
+          cp "$TARBALL" sbom.cdx.json $EXTRA_ASSETS release-assets/
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-artifacts
+          path: release-assets
+          retention-days: 90
+      - name: Extract latest changelog section
+        run: |
+          awk '
+            /^#{2,3} \[?v?[0-9]+\.[0-9]+\.[0-9]+/ { c++; if (c==2) exit }
+            c==1 { print }
+          ' CHANGELOG.md > RELEASE_NOTES.md
+      - name: Attest build provenance
+        id: provenance
+        if: ${{ !inputs.dry-run }}
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: release-assets/${{ steps.pack.outputs.tarball }}
+      - name: Attest the SBOM
+        id: sbom-attestation
+        if: ${{ !inputs.dry-run }}
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-path: release-assets/${{ steps.pack.outputs.tarball }}
+          sbom-path: sbom.cdx.json
+      - name: Collect and verify the attestation bundles # before the push: a failure here leaves nothing behind
+        if: ${{ !inputs.dry-run }}
+        working-directory: release-assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+          SIGNER: RAMEN-Suite/ramen-workflows/.github/workflows/npm-release.yml # signed here, not by the caller
+          PROVENANCE_BUNDLE: ${{ steps.provenance.outputs.bundle-path }}
+          SBOM_BUNDLE: ${{ steps.sbom-attestation.outputs.bundle-path }}
+        run: |
+          cp "$PROVENANCE_BUNDLE" "${TARBALL}.provenance.intoto.jsonl"
+          cp "$SBOM_BUNDLE" "${TARBALL}.sbom.intoto.jsonl"
+          gh attestation verify "$TARBALL" \
+            --bundle "${TARBALL}.provenance.intoto.jsonl" \
+            --repo "$GITHUB_REPOSITORY" --signer-workflow "$SIGNER" --source-ref refs/heads/main
+          gh attestation verify "$TARBALL" \
+            --bundle "${TARBALL}.sbom.intoto.jsonl" \
+            --predicate-type https://cyclonedx.org/bom \
+            --repo "$GITHUB_REPOSITORY" --signer-workflow "$SIGNER" --source-ref refs/heads/main
+      - name: Append the checksums to release notes
+        env:
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+          SHASUM: ${{ steps.pack.outputs.shasum }}
+          INTEGRITY: ${{ steps.pack.outputs.integrity }}
+        run: |
+          {
+            echo ""
+            echo "### Package checksums"
+            echo ""
+            echo "\`$TARBALL\`"
+            echo ""
+            echo "- SHA-1: \`$SHASUM\`"
+            echo "- Integrity: \`$INTEGRITY\`"
+          } >> RELEASE_NOTES.md
+      - name: Create an app token # the release App can bypass the rulesets; a dry run creates it too, to test vars and secret
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.RELEASE_GITHUB_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write # release commit, tag and GitHub release; nothing else
+      - name: Push commit and tag
+        if: ${{ !inputs.dry-run }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          if ! git push --atomic "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            "HEAD:refs/heads/main" "refs/tags/v$VERSION"; then
+            echo "::error::Push rejected. If main moved during this run, run the release again."
+            exit 1
+          fi
+      - name: Create GitHub release
+        if: ${{ !inputs.dry-run }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          gh release create "v${VERSION}" \
+            --verify-tag \
+            --title "v${VERSION}" \
+            --notes-file RELEASE_NOTES.md \
+            release-assets/*
+      - name: Write release summary
+        env:
+          DRY_RUN: ${{ inputs.dry-run }}
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          {
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "## 🧪 Dry run: v${VERSION} (nothing pushed, attested or released)"
+            else
+              echo "## 🚀 Released v${VERSION}"
+            fi
+            echo ""
+            cat RELEASE_NOTES.md
+          } >> "$GITHUB_STEP_SUMMARY"

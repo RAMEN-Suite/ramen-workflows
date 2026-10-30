@@ -1,0 +1,149 @@
+name: npm publish
+
+on:
+  workflow_call:
+    inputs:
+      install-check-script:
+        description: "npm script that installs <name>@<version> (its argument) and checks it; runs without npm ci (optional)"
+        type: string
+        default: ""
+      dry-run:
+        description: "Stage with --dry-run and skip the verification"
+        type: boolean
+        default: false
+
+permissions: {}
+
+jobs:
+  stage:
+    name: Stage on npm
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      id-token: write # required for npm trusted publishing (OIDC)
+    outputs:
+      package: ${{ steps.package.outputs.package }}
+      version: ${{ steps.package.outputs.version }}
+    steps:
+      - name: Setup Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26 # no checkout here, so no .nvmrc; staged publishing needs its npm 11.15 or newer
+      - name: Check npm version
+        run: |
+          NPM_VERSION=$(npm --version)
+          if [ "$(printf '%s\n%s\n' 11.15.0 "$NPM_VERSION" | sort -V | head -n 1)" != 11.15.0 ]; then
+            echo "::error::npm stage needs npm 11.15.0 or newer, got $NPM_VERSION"
+            exit 1
+          fi
+      - name: Download release artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-artifacts
+      - name: Read the package
+        id: package
+        run: |
+          shopt -s nullglob
+          TARBALLS=(*.tgz)
+          if [ "${#TARBALLS[@]}" != 1 ]; then
+            echo "::error::Expected exactly one .tgz in release-artifacts, found ${#TARBALLS[@]}"
+            exit 1
+          fi
+          TARBALL=${TARBALLS[0]}
+
+          tar -xOzf "$TARBALL" package/package.json > manifest.json
+          PACKAGE=$(jq -er '.name' manifest.json) # -e: fail on a missing name instead of waiting for "@" for two hours
+          VERSION=$(jq -er '.version' manifest.json)
+          SHASUM=$(sha1sum "$TARBALL" | cut -d' ' -f1)
+          INTEGRITY="sha512-$(openssl dgst -sha512 -binary "$TARBALL" | base64 -w0)"
+          {
+            echo "tarball=$TARBALL"
+            echo "package=$PACKAGE"
+            echo "version=$VERSION"
+            echo "shasum=$SHASUM"
+            echo "integrity=$INTEGRITY"
+          } >> "$GITHUB_OUTPUT"
+      - name: Stage the package
+        env:
+          TARBALL: ${{ steps.package.outputs.tarball }}
+          DRY_RUN: ${{ inputs.dry-run }}
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then
+            npm stage publish "$TARBALL" --dry-run
+            exit 0
+          fi
+
+          npm stage publish "$TARBALL"
+      - name: Write approval reminder
+        if: ${{ !inputs.dry-run }}
+        env:
+          PACKAGE: ${{ steps.package.outputs.package }}
+          VERSION: ${{ steps.package.outputs.version }}
+          TARBALL: ${{ steps.package.outputs.tarball }}
+          SHASUM: ${{ steps.package.outputs.shasum }}
+          INTEGRITY: ${{ steps.package.outputs.integrity }}
+        run: |
+          {
+            echo "## 📦 Staged on npm"
+            echo ""
+            echo "\`$PACKAGE@$VERSION\` is staged and **not installable yet**."
+            echo ""
+            echo "Approve it with 2FA to publish it:"
+            echo ""
+            echo "- on npmjs.com, under **Staged Packages**"
+            echo "- or locally: \`npm stage list $PACKAGE\` then \`npm stage approve <stage-id>\`"
+            echo ""
+            echo "### Checksums to compare"
+            echo ""
+            echo "\`$TARBALL\`"
+            echo ""
+            echo "- SHA-1: \`$SHASUM\`"
+            echo "- Integrity: \`$INTEGRITY\`"
+            echo ""
+            echo "After approval: \`npm view $PACKAGE@$VERSION dist.shasum dist.integrity\`"
+            echo ""
+            echo "The verification job below waits for the version to appear on the registry."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  verify:
+    name: Verify the published package
+    needs: [stage]
+    if: ${{ !inputs.dry-run }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120 # waits for the manual npm approval
+    permissions:
+      contents: read # required for actions/checkout to fetch repo contents if this repo is private
+    env:
+      PACKAGE: ${{ needs.stage.outputs.package }}
+      VERSION: ${{ needs.stage.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: "v${{ needs.stage.outputs.version }}"
+          persist-credentials: false
+      - name: Setup Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - name: Wait for the version to go live
+        run: |
+          echo "Waiting for $PACKAGE@$VERSION to be approved and published."
+
+          until npm view "$PACKAGE@$VERSION" version --min-release-age=0 > /dev/null 2>&1; do
+            sleep 30
+          done
+
+          echo "$PACKAGE@$VERSION is live."
+      - name: Install from the registry and check
+        if: inputs.install-check-script != ''
+        env:
+          SCRIPT: ${{ inputs.install-check-script }}
+        run: npm run "$SCRIPT" -- "$PACKAGE@$VERSION"
+      - name: Verify signature and provenance # zizmor: ignore[adhoc-packages] -- installs the published version on purpose, pinned exactly
+        run: |
+          work=$(mktemp -d)
+          cd "$work"
+          npm init -y > /dev/null
+          npm install --package-lock=false --no-audit --no-fund --min-release-age=0 "$PACKAGE@$VERSION"
+          npm audit signatures

@@ -13,6 +13,9 @@ Shared GitHub Actions for the RAMEN-Suite repositories.
 | [`security.yml`](#securityyml) | trivy, gitleaks, semgrep, CodeQL |
 | [`supply-chain.yml`](#supply-chainyml) | npm registry signatures and licenses |
 | [`node-ci.yml`](#node-ciyml) | lint, unit tests, end-to-end tests and package checks for an npm project |
+| [`npm-release.yml`](#npm-releaseyml-and-npm-publishyml) | version, build, tag and GitHub release of an npm package |
+| [`npm-publish.yml`](#npm-releaseyml-and-npm-publishyml) | stage the released package on npm and verify it once approved |
+| [`pages.yml`](#pagesyml) | build a site and deploy it to GitHub Pages |
 
 ## Usage
 
@@ -205,6 +208,144 @@ jobs:
 | `package-script` | | Job `Package checks` |
 
 Checks: `CI / Lint and format`, `CI / Unit tests`, `CI / End-to-end tests`, `CI / Package checks` (with the caller job name `CI`).
+
+### `npm-release.yml` and `npm-publish.yml`
+
+A manual release of an npm package, in two steps: `npm-release.yml` versions the repository with commit-and-tag-version, builds and packs the package, pushes the release commit and tag, attests the tarball (build provenance and SBOM) and creates the GitHub release. `npm-publish.yml` stages that tarball on npm (trusted publishing, `npm stage publish`); a maintainer approves it with 2FA, then the job waits for the version and verifies it.
+Call both from one workflow with `workflow_dispatch`, after the repository's own CI. Keep that workflow's file name: npm's trusted publisher matches the **calling** workflow (file name and environment `npm`), not this repository's.
+Needs:
+
+- `commit-and-tag-version` in the devDependencies, with its default `v` tag prefix and `CHANGELOG.md` in the repository root;
+- `package-lock.json` and `.nvmrc` in the repository root;
+- the environments `release` (variable `RELEASE_GITHUB_CLIENT_ID`, secret `RELEASE_APP_PRIVATE_KEY`, deployments from `main`) and `npm`;
+- the release App as a bypass actor on `main` and the `v*` tags. Releases run from `main` only.
+
+```yaml
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_as:
+        description: "Force a specific version, e.g. 1.0.0. Leave blank for automatic bump."
+        required: false
+        type: string
+      dry_run:
+        description: "Run everything without pushing, publishing or deploying."
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  guard:
+    name: Check branch
+    runs-on: ubuntu-latest
+    steps:
+      - name: Only release from main # before CI, so a wrong dispatch fails fast
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::Releases must run on main, got $GITHUB_REF"
+            exit 1
+          fi
+
+  ci:
+    name: CI
+    needs: [guard]
+    uses: $/.github/workflows/ci.yml # the repository's own CI, with on: workflow_call
+    permissions:
+      contents: read # required for actions/checkout to fetch repo contents if this repo is private
+
+  release:
+    name: Release
+    needs: [ci]
+    uses: RAMEN-Suite/ramen-workflows/.github/workflows/npm-release.yml@<full commit sha> # vX.Y.Z
+    with:
+      build-script: package:check
+      release-as: ${{ inputs.release_as }}
+      dry-run: ${{ inputs.dry_run }}
+    secrets:
+      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+    permissions:
+      contents: read # checkout; the release App token does every write
+      id-token: write # required to sign the provenance and SBOM attestations
+      attestations: write # required to persist the attestations
+
+  npm:
+    name: npm
+    needs: [release]
+    uses: RAMEN-Suite/ramen-workflows/.github/workflows/npm-publish.yml@<full commit sha> # vX.Y.Z
+    with:
+      dry-run: ${{ inputs.dry_run }}
+    permissions:
+      contents: read # required for actions/checkout to fetch repo contents if this repo is private
+      id-token: write # required for npm trusted publishing (OIDC)
+```
+
+`npm-release.yml`:
+
+| Input | Default | |
+|---|---|---|
+| `build-script` | (required) | npm script that builds and checks the package, run after the version bump: it must build from the bumped `package.json` |
+| `package-dir` | `.` | What `npm pack` packs, e.g. `dist/<package>` |
+| `extra-assets` | | More files for the GitHub release, space-separated paths without spaces |
+| `release-as` | | Force a version `X.Y.Z` (`commit-and-tag-version --release-as`); pre-releases are not supported |
+| `dry-run` | `false` | Version, build and pack without pushing, attesting or releasing |
+
+| Secret | |
+|---|---|
+| `RELEASE_APP_PRIVATE_KEY` | Private key of the release App; pass it by name, the job reads it in the environment `release` |
+
+Outputs: `version` (without `v`), `tarball`. Artifact: `release-artifacts` (tarball, SBOM, extra assets).
+
+`npm-publish.yml`:
+
+| Input | Default | |
+|---|---|---|
+| `install-check-script` | | npm script that installs `<name>@<version>` (its argument) and checks it; runs without `npm ci` |
+| `dry-run` | `false` | `npm stage publish --dry-run`, no verification |
+
+The attestations are signed by `npm-release.yml`, so verify the release assets with `--signer-repo`:
+
+```sh
+gh release download vX.Y.Z --repo <owner>/<repo> --pattern '*.tgz'
+gh attestation verify <package>-X.Y.Z.tgz --repo <owner>/<repo> --signer-repo RAMEN-Suite/ramen-workflows
+```
+
+Use gh 2.102.0 or later. For npm installs, `npm audit signatures` is enough.
+
+### `pages.yml`
+
+Builds a site with an npm script and deploys it to GitHub Pages (environment `github-pages`). Pages must use the build type "GitHub Actions".
+Needs `.nvmrc` in the repository root and `package-lock.json` in `working-directory`.
+
+```yaml
+  pages:
+    name: Pages
+    needs: [release]
+    uses: RAMEN-Suite/ramen-workflows/.github/workflows/pages.yml@<full commit sha> # vX.Y.Z
+    with:
+      build-script: build:pages
+      path: dist/site
+      ref: v${{ needs.release.outputs.version }}
+    permissions:
+      contents: read # required for actions/checkout to fetch repo contents if this repo is private
+      pages: write # required to deploy to GitHub Pages
+      id-token: write # required for actions/deploy-pages to verify the deployment origin
+```
+
+| Input | Default | |
+|---|---|---|
+| `build-script` | (required) | npm script that builds the site |
+| `path` | (required) | Built site, relative to `working-directory` |
+| `ref` | the run's commit | Git ref to build, e.g. the release tag |
+| `working-directory` | `.` | Directory of the npm project |
+| `dry-run` | `false` | Build and upload, don't deploy |
 
 ## Actions
 
