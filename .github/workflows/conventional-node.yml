@@ -7,7 +7,7 @@ permissions: {}
 
 jobs:
   commits:
-    name: Lint commits
+    name: ${{ github.event_name == 'push' && 'Lint commits' || 'Lint commits (push only)' }}
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
@@ -46,7 +46,7 @@ jobs:
           npx commitlint --from "$start" --to "$AFTER" --verbose
 
   title:
-    name: Lint PR title
+    name: ${{ github.event_name == 'pull_request' && 'Lint PR title' || 'Lint PR title (pull request only)' }}
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:

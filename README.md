@@ -95,7 +95,7 @@ jobs:
       contents: read # required for actions/checkout to fetch repo contents if this repo is private
 ```
 
-Checks: `Conventional / Lint commits`, `Conventional / Lint PR title`. Each job is skipped for the other event; a skipped job counts as passed.
+Checks: `Conventional / Lint commits` (on push), `Conventional / Lint PR title` (on pull requests). For the other event each job is skipped under a different name (`… (push only)`, `… (pull request only)`), so a skipped run can't satisfy a required check.
 
 ### `security.yml`
 
@@ -132,7 +132,7 @@ jobs:
 | `codeql-config-file` | | CodeQL config file in the calling repository, starting with `./` |
 
 Checks: `Security / Vulnerability and secret scan`, `Security / SAST scan`, `Security / CodeQL`.
-Code scanning tools (for code scanning rules): `Trivy`, `gitleaks`, `Semgrep OSS`, `CodeQL`; categories `trivy-fs`, `gitleaks`, `sast`, `/language:<codeql-languages>`.
+Code scanning tools (for code scanning rules): `Trivy`, `Gitleaks`, `Semgrep OSS`, `CodeQL`; categories `trivy-fs`, `gitleaks`, `sast`, `/language:<codeql-languages>`.
 A `.gitleaks.toml` in the repository root is picked up.
 CodeQL default setup must be off in the repository (Settings → Code security → CodeQL analysis), or GitHub rejects the uploads.
 
