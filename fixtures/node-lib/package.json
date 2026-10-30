@@ -1,0 +1,10 @@
+{
+  "name": "node-lib-fixture",
+  "private": true,
+  "description": "Fixture for _test-node-ci.yml",
+  "type": "module",
+  "scripts": {
+    "lint": "node --check src/index.js",
+    "test": "node --test"
+  }
+}

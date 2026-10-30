@@ -1,0 +1,24 @@
+name: "Test: Node CI"
+
+on:
+  push:
+    branches: [main, "renovate/**"]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  node-ci:
+    name: "Test: Node CI"
+    uses: $/.github/workflows/node-ci.yml
+    with:
+      working-directory: fixtures/node-lib
+      lint-scripts: lint
+      test-scripts: test
+    permissions:
+      contents: read # required for actions/checkout to fetch repo contents if this repo is private
