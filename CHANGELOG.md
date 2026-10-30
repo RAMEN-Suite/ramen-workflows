@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented here.
 
+## [0.2.0](https://github.com/RAMEN-Suite/ramen-workflows/compare/v0.1.2...v0.2.0) (2026-10-30)
+
+### ⚠ BREAKING CHANGES
+
+* split conventional-node into commitlint-node and pr-title-node
+
+### Features
+
+* split conventional-node into commitlint-node and pr-title-node ([a6ebaa1](https://github.com/RAMEN-Suite/ramen-workflows/commit/a6ebaa1abb36d2a3c22d419ec8281b735f736a7f))
+
 ## [0.1.2](https://github.com/RAMEN-Suite/ramen-workflows/compare/v0.1.1...v0.1.2) (2026-10-30)
 
 ### Bug Fixes
