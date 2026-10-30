@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here.
 
+## [0.2.1](https://github.com/RAMEN-Suite/ramen-workflows/compare/v0.2.0...v0.2.1) (2026-10-30)
+
+### Features
+
+* add npm release, publish and pages ([5af4512](https://github.com/RAMEN-Suite/ramen-workflows/commit/5af451269b02701e87d567020e22a58093fe830f))
+
 ## [0.2.0](https://github.com/RAMEN-Suite/ramen-workflows/compare/v0.1.2...v0.2.0) (2026-10-30)
 
 ### ⚠ BREAKING CHANGES
