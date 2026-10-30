@@ -8,7 +8,8 @@ Shared GitHub Actions for the RAMEN-Suite repositories.
 | Workflow | What it does |
 |---|---|
 | [`actions-lint.yml`](#actions-lintyml) | zizmor and actionlint over the workflows and actions |
-| [`conventional-node.yml`](#conventional-nodeyml) | commitlint over pushed commits and PR titles |
+| [`commitlint-node.yml`](#commitlint-nodeyml-and-pr-title-nodeyml) | commitlint over pushed commits |
+| [`pr-title-node.yml`](#commitlint-nodeyml-and-pr-title-nodeyml) | commitlint over pull request titles |
 | [`security.yml`](#securityyml) | trivy, gitleaks, semgrep, CodeQL |
 | [`supply-chain.yml`](#supply-chainyml) | npm registry signatures and licenses |
 | [`node-ci.yml`](#node-ciyml) | lint, unit tests, end-to-end tests and package checks for an npm project |
@@ -66,36 +67,55 @@ jobs:
 Checks: `Actions lint / Run Zizmor`, `Actions lint / Run actionlint`.
 If the repository uses `$/`, add a `.github/actionlint.yaml` like [this repository's](.github/actionlint.yaml).
 
-### `conventional-node.yml`
+### `commitlint-node.yml` and `pr-title-node.yml`
 
-commitlint over pushed commits (`Lint commits`, on `push`) and pull request titles (`Lint PR title`, on `pull_request`), with the repository's own commitlint config.
+commitlint with the repository's own commitlint config: `commitlint-node.yml` over the pushed commits (call it on `push`), `pr-title-node.yml` over the pull request title (call it on `pull_request`).
 With squash merges the title becomes the commit on `main`, so require `Lint PR title`.
 Needs `@commitlint/cli` and a commitlint config in the devDependencies, and `package-lock.json` and `.nvmrc` in the repository root.
 
 ```yaml
-name: Conventional commits
+name: Commitlint
 
 on:
   push:
-  pull_request:
-    branches: [main]
-    types: [opened, edited, synchronize, reopened] # edited: re-check when the title changes
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref_name }}
+  group: ${{ github.workflow }}-${{ github.ref_name }}
   cancel-in-progress: true
 
 permissions: {}
 
 jobs:
-  conventional:
+  commitlint:
     name: Conventional
-    uses: RAMEN-Suite/ramen-workflows/.github/workflows/conventional-node.yml@<full commit sha> # vX.Y.Z
+    uses: RAMEN-Suite/ramen-workflows/.github/workflows/commitlint-node.yml@<full commit sha> # vX.Y.Z
     permissions:
       contents: read # required for actions/checkout to fetch repo contents if this repo is private
 ```
 
-Checks: `Conventional / Lint commits` (on push), `Conventional / Lint PR title` (on pull requests). For the other event each job is skipped under a different name (`… (push only)`, `… (pull request only)`), so a skipped run can't satisfy a required check.
+```yaml
+name: PR title
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, edited, synchronize, reopened] # edited: re-check when the title changes
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  pr-title:
+    name: Conventional
+    uses: RAMEN-Suite/ramen-workflows/.github/workflows/pr-title-node.yml@<full commit sha> # vX.Y.Z
+    permissions:
+      contents: read # required for actions/checkout to fetch repo contents if this repo is private
+```
+
+Checks: `Conventional / Lint commits`, `Conventional / Lint PR title`.
 
 ### `security.yml`
 

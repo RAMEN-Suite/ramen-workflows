@@ -1,4 +1,4 @@
-name: Conventional commits (node)
+name: Commitlint (node)
 
 on:
   workflow_call:
@@ -7,8 +7,7 @@ permissions: {}
 
 jobs:
   commits:
-    name: ${{ github.event_name == 'push' && 'Lint commits' || 'Lint commits (push only)' }}
-    if: github.event_name == 'push'
+    name: Lint commits
     runs-on: ubuntu-latest
     permissions:
       contents: read # required for actions/checkout to fetch repo contents if this repo is private
@@ -44,27 +43,3 @@ jobs:
           fi
 
           npx commitlint --from "$start" --to "$AFTER" --verbose
-
-  title:
-    name: ${{ github.event_name == 'pull_request' && 'Lint PR title' || 'Lint PR title (pull request only)' }}
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read # required for actions/checkout to fetch repo contents if this repo is private
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Setup Node
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-          cache-dependency-path: package-lock.json
-      - name: Install tooling
-        run: npm ci
-      - name: Lint title against commitlint
-        env:
-          PR_TITLE: ${{ github.event.pull_request.title }}
-        run: echo "$PR_TITLE" | npx commitlint --verbose

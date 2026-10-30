@@ -1,0 +1,19 @@
+name: "Test: PR title (node)"
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, edited, synchronize, reopened] # edited: re-check when the title changes
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  pr-title:
+    name: Conventional
+    uses: $/.github/workflows/pr-title-node.yml
+    permissions:
+      contents: read # required for actions/checkout to fetch repo contents if this repo is private
