@@ -1,4 +1,4 @@
-name: Conventional commits
+name: "Test: Conventional commits (node)"
 
 on:
   push:

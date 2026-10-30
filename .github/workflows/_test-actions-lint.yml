@@ -1,4 +1,4 @@
-name: GitHub Actions Security Analysis with zizmor 🌈
+name: "Test: Actions lint"
 
 on:
   push:

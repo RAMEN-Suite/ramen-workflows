@@ -1,4 +1,4 @@
-name: Security
+name: "Test: Security"
 
 on:
   push:
@@ -14,7 +14,7 @@ permissions: {}
 
 jobs:
   security:
-    name: Security
+    name: "Test: Security"
     uses: $/.github/workflows/security.yml
     with:
       codeql-languages: actions
