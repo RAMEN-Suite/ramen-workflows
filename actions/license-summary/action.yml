@@ -1,0 +1,16 @@
+name: License summary
+description: Write a trivy license report (JSON) as a table to the job summary
+
+inputs:
+  report-file:
+    description: Path of the trivy license report (trivy fs --scanners license --format json)
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Write summary
+      shell: bash
+      env:
+        REPORT_FILE: ${{ inputs.report-file }}
+      run: bash "$GITHUB_ACTION_PATH/summary.sh" # via bash: works even if the file lost its executable bit
