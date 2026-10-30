@@ -10,6 +10,7 @@ on:
       - "!.github/workflows/zizmor.yml"
       - "!.github/workflows/scorecard.yml"
       - "!.github/workflows/commitlint.yml"
+      - "!.github/workflows/scan.yml"
   workflow_dispatch:
     inputs:
       release_as:

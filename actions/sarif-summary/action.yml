@@ -1,0 +1,20 @@
+name: SARIF summary
+description: Write a SARIF report as a table to the job summary
+
+inputs:
+  sarif-file:
+    description: Path of the SARIF file
+    required: true
+  title:
+    description: Heading of the summary section, e.g. "🔍 Trivy"
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Write summary
+      shell: bash
+      env:
+        SARIF_FILE: ${{ inputs.sarif-file }}
+        TITLE: ${{ inputs.title }}
+      run: bash "$GITHUB_ACTION_PATH/summary.sh" # via bash: works even if the file lost its executable bit
