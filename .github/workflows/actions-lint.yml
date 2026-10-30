@@ -1,20 +1,12 @@
-name: GitHub Actions Security Analysis with zizmor 🌈
+name: Actions lint
 
 on:
-  push:
-    branches: [main, "renovate/**"]
-  pull_request:
-    branches: [main]
   workflow_call:
     inputs:
       advanced-security:
         description: "Upload findings to code scanning (true) or fail the job on findings (false)"
         type: boolean
         default: true
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref_name }}
-  cancel-in-progress: true
 
 permissions: {}
 
@@ -40,7 +32,7 @@ jobs:
         uses: zizmorcore/zizmor-action@85b2b9fb8e3325e7a23d7d0a9d7ba5ae0f999e3e # v0.7.1
         with:
           version: ${{ env.ZIZMOR_VERSION }}
-          advanced-security: ${{ github.event.repository.visibility == 'public' && format('{0}', inputs.advanced-security) != 'false' }}
+          advanced-security: ${{ github.event.repository.visibility == 'public' && inputs.advanced-security }}
   actionlint:
     name: Run actionlint
     runs-on: ubuntu-latest

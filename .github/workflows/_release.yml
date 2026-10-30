@@ -6,9 +6,7 @@ on:
     paths:
       - ".github/workflows/**"
       - "actions/**"
-      - "!.github/workflows/release.yml"
-      - "!.github/workflows/zizmor.yml"
-      - "!.github/workflows/scorecard.yml"
+      - "!.github/workflows/_*"
   workflow_dispatch:
     inputs:
       release_as:
@@ -43,13 +41,13 @@ jobs:
   ci:
     name: CI
     needs: [guard]
-    uses: $/.github/workflows/zizmor.yml
+    uses: $/.github/workflows/actions-lint.yml
     with:
       advanced-security: false
     permissions:
       contents: read # required for actions/checkout to fetch repo contents if this repo is private
-      security-events: write # zizmor.yml declares it for its code scanning upload (unused here)
-      actions: read # zizmor.yml declares it for upload-sarif in private repos (unused here)
+      security-events: write # actions-lint.yml declares it for its code scanning upload
+      actions: read # actions-lint.yml declares it for upload-sarif in private repos
 
   prepare:
     name: Version and changelog
@@ -245,7 +243,7 @@ jobs:
           gh attestation verify "$TARBALL" \
             --bundle "${TARBALL}.provenance.intoto.jsonl" \
             --repo "$GITHUB_REPOSITORY" \
-            --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/release.yml" \
+            --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/_release.yml" \
             --source-ref refs/heads/main
 
       - name: Append the checksum to the release notes
@@ -313,7 +311,7 @@ jobs:
           gh attestation verify "$TARBALL" \
             --bundle "${TARBALL}.provenance.intoto.jsonl" \
             --repo "$GITHUB_REPOSITORY" \
-            --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/release.yml" \
+            --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/_release.yml" \
             --source-ref refs/heads/main
 
       - name: Write verification summary

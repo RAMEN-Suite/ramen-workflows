@@ -1,0 +1,23 @@
+name: "Test: Security"
+
+on:
+  push:
+    branches: [main, "renovate/**"]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  security:
+    name: "Test: Security"
+    uses: $/.github/workflows/security.yml
+    with:
+      codeql-languages: actions
+    permissions:
+      contents: read # required for actions/checkout to fetch repo contents if this repo is private
+      security-events: write # required for uploading results to code scanning
