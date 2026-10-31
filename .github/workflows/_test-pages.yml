@@ -2,7 +2,7 @@ name: "Test: Pages"
 
 on:
   push:
-    branches: [main, "renovate/**"]
+    branches: [main, "deps/**"]
   pull_request:
     branches: [main]
 

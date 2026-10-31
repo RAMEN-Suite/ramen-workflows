@@ -34,7 +34,7 @@ jobs:
 - The calling job grants the permissions. A reusable workflow can only reduce them, so each one documents what it needs.
 - Pass each secret by name under `secrets:`, never `secrets: inherit`.
 - Status checks are named `<caller job name> / <job name>`.
-- Run the workflows on `push` to `main` and `renovate/**` and on pull requests, without a `paths` filter: a required check whose workflow was filtered out stays pending.
+- Run the workflows on `push` to `main` and `deps/**` (Renovate's branches) and on pull requests, without a `paths` filter: a required check whose workflow was filtered out stays pending. Renovate automerges a branch once every check run on it passed, so a workflow that skips its branches lets the merge through untested.
 
 ## Workflows
 
@@ -47,7 +47,7 @@ name: Actions lint
 
 on:
   push:
-    branches: [main, "renovate/**"] # renovate/**: Renovate automerges a branch only after its checks passed
+    branches: [main, "deps/**"] # deps/**: Renovate's branches; it automerges one only after its checks passed
   pull_request:
     branches: [main]
 
@@ -130,7 +130,7 @@ name: Security
 
 on:
   push:
-    branches: [main, "renovate/**"]
+    branches: [main, "deps/**"]
   pull_request:
     branches: [main]
 

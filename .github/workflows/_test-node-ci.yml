@@ -2,7 +2,7 @@ name: "Test: Node CI"
 
 on:
   push:
-    branches: [main, "renovate/**"]
+    branches: [main, "deps/**"]
   pull_request:
     branches: [main]
 

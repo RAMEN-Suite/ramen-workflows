@@ -2,7 +2,7 @@ name: "Test: Actions lint"
 
 on:
   push:
-    branches: [main, "renovate/**"]
+    branches: [main, "deps/**"]
   pull_request:
     branches: [main]
 
