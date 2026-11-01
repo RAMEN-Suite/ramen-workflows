@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here.
 
+## [0.2.2](https://github.com/RAMEN-Suite/ramen-workflows/compare/v0.2.1...v0.2.2) (2026-11-01)
+
+### Features
+
+* add container and config lint workflows ([#4](https://github.com/RAMEN-Suite/ramen-workflows/issues/4)) ([f884a55](https://github.com/RAMEN-Suite/ramen-workflows/commit/f884a55d0cc28e23ab9bf6b0dced97c4db52c1b3))
+
 ## [0.2.1](https://github.com/RAMEN-Suite/ramen-workflows/compare/v0.2.0...v0.2.1) (2026-10-30)
 
 ### Features
