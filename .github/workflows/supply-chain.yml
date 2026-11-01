@@ -3,6 +3,10 @@ name: Supply chain
 on:
   workflow_call:
     inputs:
+      working-directories:
+        description: "npm projects (directories with package-lock.json), space-separated; licenses: whole repository"
+        type: string
+        default: "."
       include-dev-deps:
         description: "Also scan the licenses of devDependencies (by default trivy only scans what ships)"
         type: boolean
@@ -30,11 +34,16 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: "npm"
-          cache-dependency-path: package-lock.json
-      - name: Install dependencies
-        run: npm ci
-      - name: Verify registry signatures
-        run: npm audit signatures
+          cache-dependency-path: "**/package-lock.json"
+      - name: Install dependencies and verify registry signatures
+        env:
+          DIRECTORIES: ${{ inputs.working-directories }}
+        run: |
+          for dir in $DIRECTORIES; do
+            echo "::group::$dir"
+            (cd "$dir" && npm ci && npm audit signatures)
+            echo "::endgroup::"
+          done
       - name: Scan licenses with trivy
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         env:

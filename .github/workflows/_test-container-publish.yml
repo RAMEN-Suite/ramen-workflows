@@ -1,0 +1,33 @@
+name: "Test: Container publish"
+
+# Pushes the fixture image ghcr.io/ramen-suite/ramen-workflows-docker-app: only from main, never for pull requests.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  container-publish:
+    name: "Test: Container publish"
+    if: github.ref == 'refs/heads/main'
+    uses: $/.github/workflows/container-publish.yml
+    with:
+      name: docker-app
+      dockerfile: fixtures/docker-app/Dockerfile
+      context: fixtures/docker-app
+      tags: |
+        type=sha,format=short
+        type=raw,value=test
+    permissions:
+      contents: read # required for actions/checkout to fetch repo contents if this repo is private
+      packages: write # push the fixture image and its attestations
+      id-token: write # required to sign the attestations
+      attestations: write # required to persist the attestations
+      security-events: write # required for uploading the image scan to code scanning
+      artifact-metadata: write # actions/attest records the pushed image as an artifact of this repository

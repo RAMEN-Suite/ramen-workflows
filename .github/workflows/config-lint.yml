@@ -1,0 +1,85 @@
+name: Config lint
+
+on:
+  workflow_call:
+    inputs:
+      dockerfiles:
+        description: "Dockerfiles to lint with hadolint, space-separated, relative to the repository root"
+        type: string
+        required: true
+
+permissions: {}
+
+env:
+  # renovate: datasource=github-releases depName=aquasecurity/trivy
+  TRIVY_VERSION: "v0.76.1"
+
+jobs:
+  hadolint:
+    name: Dockerfile lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # required for actions/checkout to fetch repo contents if this repo is private
+      security-events: write # required for uploading results to code scanning
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Run hadolint
+        uses: docker://hadolint/hadolint:v2.15.1-alpine@sha256:a1d49ae1a4e83c1dbad26b8c1ad7588c8bd1e04f4866b34ad3cac50335198552
+        env:
+          DOCKERFILES: ${{ inputs.dockerfiles }}
+        with:
+          entrypoint: /bin/sh
+          args: >-
+            -c "hadolint --no-color $DOCKERFILES; status=$?;
+            hadolint --format sarif $DOCKERFILES > hadolint.sarif; exit $status"
+      - name: Upload hadolint report to code scanning
+        if: always() && github.event.repository.visibility == 'public' && hashFiles('hadolint.sarif') != ''
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          sarif_file: hadolint.sarif
+          category: hadolint
+      - name: Write hadolint summary
+        if: always()
+        uses: $/actions/sarif-summary
+        with:
+          sarif-file: hadolint.sarif
+          title: 🐋 hadolint
+
+  misconfig:
+    name: Misconfiguration scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # required for actions/checkout to fetch repo contents if this repo is private
+      security-events: write # required for uploading results to code scanning
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Scan for misconfigurations
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: misconfig
+          format: sarif
+          output: trivy-config.sarif
+          severity: "CRITICAL,HIGH"
+          limit-severities-for-sarif: true
+          exit-code: "1"
+          version: ${{ env.TRIVY_VERSION }}
+      - name: Upload trivy report to code scanning
+        if: always() && github.event.repository.visibility == 'public' && hashFiles('trivy-config.sarif') != ''
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          sarif_file: trivy-config.sarif
+          category: trivy-config
+      - name: Write trivy summary
+        if: always()
+        uses: $/actions/sarif-summary
+        with:
+          sarif-file: trivy-config.sarif
+          title: 🔧 Trivy misconfiguration

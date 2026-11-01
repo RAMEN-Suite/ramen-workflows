@@ -1,0 +1,117 @@
+name: Image scan
+description: >-
+  SBOM, vulnerability report and license report for a local container image, with optional gates.
+  The calling job uploads and summarizes the reports. Both reports are written before any gate runs.
+
+inputs:
+  image:
+    description: Image reference in the local Docker engine
+    required: true
+  name:
+    description: Short name used in the report file names, e.g. "client"
+    required: true
+  fail-on-vulnerabilities:
+    description: '"true": fail on CRITICAL vulnerabilities that have a fix'
+    required: false
+    default: "false"
+  license-deny:
+    description: Regular expression (jq, case-insensitive) of license names that fail the scan
+    required: false
+    default: "AGPL"
+  trivy-version:
+    description: trivy version for trivy-action
+    required: true
+
+outputs:
+  sbom-file:
+    description: CycloneDX SBOM of the image
+    value: ${{ steps.files.outputs.sbom }}
+  sarif-file:
+    description: trivy vulnerability report (SARIF, CRITICAL and HIGH)
+    value: ${{ steps.files.outputs.sarif }}
+  license-file:
+    description: trivy license report (JSON)
+    value: ${{ steps.files.outputs.licenses }}
+
+runs:
+  using: composite
+  steps:
+    - name: Name the report files
+      id: files
+      shell: bash
+      env:
+        NAME: ${{ inputs.name }}
+      run: |
+        {
+          echo "sbom=sbom-${NAME}.cdx.json"
+          echo "sarif=trivy-image-${NAME}.sarif"
+          echo "licenses=licenses-${NAME}.json"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Generate the SBOM
+      uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+      with:
+        scan-type: image
+        image-ref: ${{ inputs.image }}
+        format: cyclonedx
+        output: ${{ steps.files.outputs.sbom }}
+        version: ${{ inputs.trivy-version }}
+
+    - name: Scan for vulnerabilities
+      uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+      with:
+        scan-type: image
+        image-ref: ${{ inputs.image }}
+        scanners: vuln
+        format: sarif
+        output: ${{ steps.files.outputs.sarif }}
+        severity: "CRITICAL,HIGH"
+        limit-severities-for-sarif: true
+        ignore-unfixed: true
+        exit-code: "0"
+        skip-setup-trivy: true # installed by the first trivy step
+        version: ${{ inputs.trivy-version }}
+
+    - name: Scan licenses
+      uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+      with:
+        scan-type: image
+        image-ref: ${{ inputs.image }}
+        scanners: license
+        format: json
+        output: ${{ steps.files.outputs.licenses }}
+        severity: "UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL" # inventory only, the gate is the next step
+        exit-code: "0"
+        skip-setup-trivy: true
+        version: ${{ inputs.trivy-version }}
+
+    - name: Check image licenses
+      shell: bash
+      env:
+        REPORT: ${{ steps.files.outputs.licenses }}
+        DENY: ${{ inputs.license-deny }}
+      run: |
+        denied=$(jq -r --arg deny "$DENY" '
+          [.Results[]?.Licenses[]? | select(.Name | test($deny; "i"))]
+          | map("\(.Name)\t\(.PkgName // .FilePath // "unknown")") | unique | .[]
+        ' "$REPORT")
+        if [ -n "$denied" ]; then
+          echo "::error::Licenses matching '$DENY' found in the image:"
+          printf '%s\n' "$denied"
+          exit 1
+        fi
+        echo "No licenses matching '$DENY'."
+
+    - name: Fail on fixable CRITICAL vulnerabilities
+      if: inputs.fail-on-vulnerabilities == 'true'
+      uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+      with:
+        scan-type: image
+        image-ref: ${{ inputs.image }}
+        scanners: vuln
+        format: table
+        severity: "CRITICAL"
+        ignore-unfixed: true
+        exit-code: "1"
+        skip-setup-trivy: true
+        version: ${{ inputs.trivy-version }}

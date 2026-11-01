@@ -1,0 +1,25 @@
+name: "Test: Container check"
+
+on:
+  push:
+    branches: [main, "deps/**"]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  container-check:
+    name: "Test: Container check"
+    uses: $/.github/workflows/container-check.yml
+    with:
+      name: docker-app
+      dockerfile: fixtures/docker-app/Dockerfile
+      context: fixtures/docker-app
+    permissions:
+      contents: read # required for actions/checkout to fetch repo contents if this repo is private
+      security-events: write # required for uploading the image scan to code scanning
