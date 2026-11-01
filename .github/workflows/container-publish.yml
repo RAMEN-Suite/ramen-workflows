@@ -1,0 +1,189 @@
+name: Container publish
+
+on:
+  workflow_call:
+    inputs:
+      name:
+        description: "Short image name: the image is ghcr.io/<owner>/<repo>-<name>, e.g. client"
+        type: string
+        required: true
+      dockerfile:
+        description: "Path of the Dockerfile, relative to the repository root"
+        type: string
+        required: true
+      context:
+        description: "Build context, relative to the repository root"
+        type: string
+        default: "."
+      tags:
+        description: "Tag rules for docker/metadata-action, one per line"
+        type: string
+        required: true
+      license-deny:
+        description: "Regular expression of license names that fail the image (case-insensitive)"
+        type: string
+        default: "AGPL"
+    outputs:
+      image:
+        description: "Image name without tag, e.g. ghcr.io/ramen-suite/shoyu-client"
+        value: ${{ jobs.publish.outputs.image }}
+      digest:
+        description: "Digest of the pushed image (sha256:…)"
+        value: ${{ jobs.publish.outputs.digest }}
+      sha-tag:
+        description: "The sha-<short commit> tag of the pushed image"
+        value: ${{ jobs.publish.outputs.sha-tag }}
+
+permissions: {}
+
+env:
+  # renovate: datasource=github-releases depName=aquasecurity/trivy
+  TRIVY_VERSION: "v0.76.1"
+
+jobs:
+  publish:
+    name: Build, scan and push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # required for actions/checkout to fetch repo contents if this repo is private
+      packages: write # push the image to ghcr.io and attach the attestations to it
+      id-token: write # required to sign the provenance and SBOM attestations
+      attestations: write # required to persist the attestations
+      security-events: write # required for uploading the image scan to code scanning
+      artifact-metadata: write # actions/attest records the pushed image as an artifact of this repository
+    outputs:
+      image: ${{ steps.image.outputs.name }}
+      digest: ${{ steps.push.outputs.digest }}
+      sha-tag: ${{ steps.push.outputs.sha-tag }}
+    steps:
+      - name: Refuse pull request events
+        if: startsWith(github.event_name, 'pull_request')
+        run: |
+          echo "::error::container-publish.yml pushes images: call container-check.yml for pull requests"
+          exit 1
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Name the image
+        id: image
+        env:
+          NAME: ${{ inputs.name }}
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}-${NAME,,}" >> "$GITHUB_OUTPUT" # registry names are lowercase
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Extract metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ steps.image.outputs.name }}
+          tags: ${{ inputs.tags }}
+      - name: Build the image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ inputs.context }}
+          file: ${{ inputs.dockerfile }}
+          pull: true
+          load: true
+          provenance: false
+          sbom: false
+          push: false # pushed below, only after the scan passed
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ inputs.name }}
+          cache-to: type=gha,mode=max,scope=${{ inputs.name }}
+      - name: Scan the image
+        id: scan
+        uses: $/actions/image-scan
+        with:
+          image: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
+          name: ${{ inputs.name }}
+          fail-on-vulnerabilities: "true"
+          license-deny: ${{ inputs.license-deny }}
+          trivy-version: ${{ env.TRIVY_VERSION }}
+      - name: Upload the image scan to code scanning
+        if: >-
+          always() && github.event.repository.visibility == 'public'
+          && hashFiles(format('trivy-image-{0}.sarif', inputs.name)) != ''
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          sarif_file: trivy-image-${{ inputs.name }}.sarif
+          category: trivy-image-${{ inputs.name }}
+      - name: Write vulnerability summary
+        if: always()
+        uses: $/actions/sarif-summary
+        with:
+          sarif-file: trivy-image-${{ inputs.name }}.sarif
+          title: 🐳 Trivy image (${{ inputs.name }})
+      - name: Write license summary
+        if: always()
+        uses: $/actions/license-summary
+        with:
+          report-file: licenses-${{ inputs.name }}.json
+      - name: Log in to ghcr.io
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push the image
+        id: push
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+          IMAGE: ${{ steps.image.outputs.name }}
+        run: |
+          while IFS= read -r tag; do
+            [ -n "$tag" ] && docker push "$tag"
+          done <<< "$TAGS"
+
+          first=$(head -n 1 <<< "$TAGS")
+          digest=$(docker inspect --format '{{index .RepoDigests 0}}' "$first")
+          digest=${digest#*@}
+          if ! [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::Could not read the pushed digest, got '$digest'"
+            exit 1
+          fi
+          sha_tag=$(grep -o -m 1 ':sha-[0-9a-f]*$' <<< "$TAGS" || true)
+          {
+            echo "digest=$digest"
+            echo "sha-tag=${sha_tag#:}"
+          } >> "$GITHUB_OUTPUT"
+      - name: Attest build provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ steps.image.outputs.name }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+      - name: Attest the SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ steps.image.outputs.name }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          sbom-path: sbom-${{ inputs.name }}.cdx.json
+          push-to-registry: true
+      - name: Write publish summary
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          {
+            echo "## 📦 Pushed \`${IMAGE}@${DIGEST}\`"
+            echo ""
+            echo "Tags:"
+            echo ""
+            while IFS= read -r tag; do
+              [ -n "$tag" ] && printf -- "- \`%s\`\n" "$tag"
+            done <<< "$TAGS"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: image-${{ inputs.name }}-reports
+          path: | # fixed names from actions/image-scan: its outputs may be unset when a gate failed
+            sbom-${{ inputs.name }}.cdx.json
+            trivy-image-${{ inputs.name }}.sarif
+            licenses-${{ inputs.name }}.json
+          if-no-files-found: ignore
+          retention-days: 90

@@ -16,6 +16,9 @@ Shared GitHub Actions for the RAMEN-Suite repositories.
 | [`npm-release.yml`](#npm-releaseyml-and-npm-publishyml) | version, build, tag and GitHub release of an npm package |
 | [`npm-publish.yml`](#npm-releaseyml-and-npm-publishyml) | stage the released package on npm and verify it once approved |
 | [`pages.yml`](#pagesyml) | build a site and deploy it to GitHub Pages |
+| [`config-lint.yml`](#config-lintyml) | hadolint and trivy misconfiguration scan |
+| [`container-check.yml`](#container-checkyml-and-container-publishyml) | build and scan a container image (pull requests) |
+| [`container-publish.yml`](#container-checkyml-and-container-publishyml) | build, scan, push and attest a container image |
 
 ## Usage
 
@@ -175,6 +178,7 @@ jobs:
 
 | Input | Default | |
 |---|---|---|
+| `working-directories` | `.` | npm projects (each with `package-lock.json`), space-separated: `npm ci` and `npm audit signatures` run in each. The license scan always covers the whole repository |
 | `include-dev-deps` | `false` | Also scan the licenses of devDependencies (by default only what ships) |
 
 Check: `<caller job name> / Supply chain`.
@@ -347,6 +351,83 @@ Needs `.nvmrc` in the repository root and `package-lock.json` in `working-direct
 | `working-directory` | `.` | Directory of the npm project |
 | `dry-run` | `false` | Build and upload, don't deploy |
 
+### `config-lint.yml`
+
+hadolint over the given Dockerfiles (with the repository's `.hadolint.yml`; its `failure-threshold` decides) and a trivy misconfiguration scan of the repository (fails on `HIGH`/`CRITICAL`). Reports go to code scanning on public repositories.
+
+```yaml
+jobs:
+  config-lint:
+    name: Config lint
+    uses: RAMEN-Suite/ramen-workflows/.github/workflows/config-lint.yml@<full commit sha> # vX.Y.Z
+    with:
+      dockerfiles: client/Dockerfile server/Dockerfile
+    permissions:
+      contents: read # required for actions/checkout to fetch repo contents if this repo is private
+      security-events: write # required for uploading results to code scanning
+```
+
+Checks: `Config lint / Dockerfile lint`, `Config lint / Misconfiguration scan`. Code scanning tools: `Hadolint`, `Trivy`; categories `hadolint`, `trivy-config`.
+
+### `container-check.yml` and `container-publish.yml`
+
+Both build an image and scan it with [`actions/image-scan`](#actions): a CycloneDX SBOM, a vulnerability report and a license report.
+The image fails on licenses matching `license-deny` (default `AGPL`): an image ships its OS, and Alpine alone brings GPL packages, so the stricter rule for the project's own dependencies lives in `supply-chain.yml`.
+
+- `container-check.yml` (pull requests): builds and scans, reports vulnerabilities without failing. No push token: only `contents: read` and `security-events: write`.
+- `container-publish.yml` (pushes): also fails on fixable `CRITICAL` vulnerabilities, then pushes all tags to `ghcr.io/<owner>/<repo>-<name>` and attaches build provenance and the SBOM as attestations. It needs `packages: write`, so it is a separate workflow: a pull request job never holds a push token. It refuses to run for `pull_request` events.
+
+Pull requests, both images as a matrix:
+
+```yaml
+jobs:
+  image:
+    name: ${{ matrix.name }} image
+    strategy:
+      matrix:
+        name: [client, server]
+    uses: RAMEN-Suite/ramen-workflows/.github/workflows/container-check.yml@<full commit sha> # vX.Y.Z
+    with:
+      name: ${{ matrix.name }}
+      dockerfile: ${{ matrix.name }}/Dockerfile
+    permissions:
+      contents: read # required for actions/checkout to fetch repo contents if this repo is private
+      security-events: write # required for uploading the image scan to code scanning
+```
+
+Pushes: one job per image when later jobs need its outputs (outputs of matrix legs overwrite each other):
+
+```yaml
+jobs:
+  client-image:
+    name: Client image
+    uses: RAMEN-Suite/ramen-workflows/.github/workflows/container-publish.yml@<full commit sha> # vX.Y.Z
+    with:
+      name: client
+      dockerfile: client/Dockerfile
+      tags: |
+        type=raw,value=dev
+        type=sha,format=short
+    permissions:
+      contents: read # required for actions/checkout to fetch repo contents if this repo is private
+      packages: write # push the image and its attestations
+      id-token: write # required to sign the attestations
+      attestations: write # required to persist the attestations
+      security-events: write # required for uploading the image scan to code scanning
+      artifact-metadata: write # actions/attest records the pushed image as an artifact of the repository
+```
+
+| Input | Default | |
+|---|---|---|
+| `name` | (required) | Short name: image `ghcr.io/<owner>/<repo>-<name>`, report names, build cache scope |
+| `dockerfile` | (required) | Dockerfile path |
+| `context` | `.` | Build context |
+| `tags` | (required, publish only) | Tag rules for [docker/metadata-action](https://github.com/docker/metadata-action#tags-input) |
+| `license-deny` | `AGPL` | Regular expression (case-insensitive) of license names that fail the image |
+
+`container-publish.yml` outputs: `image`, `digest`, `sha-tag` (the `sha-<short commit>` tag if the tag rules create one).
+Checks: `<caller job name> / Build and scan`, `<caller job name> / Build, scan and push`. Code scanning category `trivy-image-<name>`.
+
 ## Actions
 
 Helpers of the reusable workflows; they write job summaries.
@@ -356,6 +437,7 @@ Helpers of the reusable workflows; they write job summaries.
 | `actions/sarif-summary` | a SARIF report (trivy, gitleaks, semgrep) |
 | `actions/license-summary` | a trivy license report (JSON) |
 | `actions/coverage-summary` | an istanbul `coverage-summary.json` |
+| `actions/image-scan` | a local container image: SBOM, vulnerability and license reports, optional gates (no summary) |
 
 ## Versioning
 

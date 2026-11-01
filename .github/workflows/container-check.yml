@@ -1,0 +1,98 @@
+name: Container check
+
+on:
+  workflow_call:
+    inputs:
+      name:
+        description: "Short image name, e.g. client; used for report names and the build cache"
+        type: string
+        required: true
+      dockerfile:
+        description: "Path of the Dockerfile, relative to the repository root"
+        type: string
+        required: true
+      context:
+        description: "Build context, relative to the repository root"
+        type: string
+        default: "."
+      license-deny:
+        description: "Regular expression of license names that fail the image (case-insensitive)"
+        type: string
+        default: "AGPL"
+
+permissions: {}
+
+env:
+  # renovate: datasource=github-releases depName=aquasecurity/trivy
+  TRIVY_VERSION: "v0.76.1"
+
+jobs:
+  check:
+    name: Build and scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # required for actions/checkout to fetch repo contents if this repo is private
+      security-events: write # required for uploading the image scan to code scanning
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Name the local image
+        id: image
+        env:
+          NAME: ${{ inputs.name }}
+        run: echo "ref=local/${NAME,,}:check" >> "$GITHUB_OUTPUT" # image references are lowercase
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build the image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ inputs.context }}
+          file: ${{ inputs.dockerfile }}
+          pull: true
+          load: true
+          provenance: false
+          sbom: false
+          push: false
+          tags: ${{ steps.image.outputs.ref }}
+          cache-from: type=gha,scope=${{ inputs.name }}
+          cache-to: type=gha,mode=max,scope=${{ inputs.name }}
+      - name: Scan the image
+        id: scan
+        uses: $/actions/image-scan
+        with:
+          image: ${{ steps.image.outputs.ref }}
+          name: ${{ inputs.name }}
+          license-deny: ${{ inputs.license-deny }}
+          trivy-version: ${{ env.TRIVY_VERSION }}
+      - name: Upload the image scan to code scanning
+        if: >-
+          always() && github.event.repository.visibility == 'public'
+          && hashFiles(format('trivy-image-{0}.sarif', inputs.name)) != ''
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          sarif_file: trivy-image-${{ inputs.name }}.sarif
+          category: trivy-image-${{ inputs.name }}
+      - name: Write vulnerability summary
+        if: always()
+        uses: $/actions/sarif-summary
+        with:
+          sarif-file: trivy-image-${{ inputs.name }}.sarif
+          title: 🐳 Trivy image (${{ inputs.name }})
+      - name: Write license summary
+        if: always()
+        uses: $/actions/license-summary
+        with:
+          report-file: licenses-${{ inputs.name }}.json
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: image-${{ inputs.name }}-reports
+          path: |
+            sbom-${{ inputs.name }}.cdx.json
+            trivy-image-${{ inputs.name }}.sarif
+            licenses-${{ inputs.name }}.json
+          if-no-files-found: ignore
+          retention-days: 14
