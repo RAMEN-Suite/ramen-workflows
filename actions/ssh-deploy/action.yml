@@ -1,0 +1,28 @@
+name: SSH deploy
+description: Deploy images to every stack through the deploy gateway (ssh deploy <stack> <service> <tag@digest>)
+
+inputs:
+  config:
+    description: ssh config from actions/ssh-setup (host alias deploy-target)
+    required: true
+  stacks:
+    description: JSON list of stacks on the host, e.g. ["ed/shoyu", "pub/shoyu"] (the environment variable DEPLOY_STACKS)
+    required: true
+  images:
+    description: 'JSON object service -> "tag@sha256:digest", deployed in this order, e.g. {"server": "sha-1a2b3c4@sha256:…", "client": "…"}'
+    required: true
+  token:
+    description: Token with packages read; piped to the gateway so the host can pull
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Deploy
+      shell: bash
+      env:
+        SSH_CONFIG: ${{ inputs.config }}
+        STACKS: ${{ inputs.stacks }}
+        IMAGES: ${{ inputs.images }}
+        TOKEN: ${{ inputs.token }}
+      run: bash "$GITHUB_ACTION_PATH/deploy.sh"

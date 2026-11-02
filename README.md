@@ -19,6 +19,7 @@ Shared GitHub Actions for the RAMEN-Suite repositories.
 | [`config-lint.yml`](#config-lintyml) | hadolint and trivy misconfiguration scan |
 | [`container-check.yml`](#container-checkyml-and-container-publishyml) | build and scan a container image (pull requests) |
 | [`container-publish.yml`](#container-checkyml-and-container-publishyml) | build, scan, push and attest a container image |
+| [`deploy-ssh.yml`](#deploy-sshyml) | deploy images to an environment through the deploy gateway (ssh) |
 
 ## Usage
 
@@ -428,6 +429,46 @@ jobs:
 `container-publish.yml` outputs: `image`, `digest`, `sha-tag` (the `sha-<short commit>` tag if the tag rules create one).
 Checks: `<caller job name> / Build and scan`, `<caller job name> / Build, scan and push`. Code scanning category `trivy-image-<name>`.
 
+### `deploy-ssh.yml`
+
+Deploys images to one GitHub environment through the deploy gateway of its host (`ssh deploy <stack> <service> <tag@digest>`).
+Images are deployed by digest, so the host pulls exactly what was built. Pass the digests from `container-publish.yml` outputs; a digest looked up by tag in the registry should be verified first (`gh attestation verify`).
+Everything host-specific comes from the environment, written by the `deploy-gateway` Ansible role: the secrets `SSH_HOST`, `SSH_USER`, `SSH_KNOWN_HOSTS`, `SSH_DEPLOY_KEY` and the variable `DEPLOY_STACKS` (JSON list of the host's stacks for the repository). No host or stack name lives in a workflow.
+
+1. The deploy key goes into `ssh-agent` only, and ssh accepts only the host keys in `SSH_KNOWN_HOSTS`.
+2. Each service is deployed to each stack, in the order of `images`. The gateway waits for health and rolls a service back by itself if it doesn't become healthy (exit 70); the first failure stops the job.
+
+The job pipes its token (`packages: read`) to the gateway so the host can pull from ghcr.io. One deploy per environment runs at a time: a running deploy is never cancelled, and of several waiting ones only the newest runs. The job times out after 30 minutes.
+
+The SSH secrets must be passed by name, although they live in the environment: an unpassed secret is silently empty in a reusable workflow. The job's `environment` then supplies the environment's values.
+
+```yaml
+jobs:
+  deploy:
+    name: Development
+    needs: [client-image, server-image]
+    uses: RAMEN-Suite/ramen-workflows/.github/workflows/deploy-ssh.yml@<full commit sha> # vX.Y.Z
+    with:
+      environment: development
+      images: >-
+        {"server": "${{ needs.server-image.outputs.sha-tag }}@${{ needs.server-image.outputs.digest }}",
+         "client": "${{ needs.client-image.outputs.sha-tag }}@${{ needs.client-image.outputs.digest }}"}
+    secrets:
+      SSH_HOST: ${{ secrets.SSH_HOST }}
+      SSH_USER: ${{ secrets.SSH_USER }}
+      SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+      SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
+    permissions:
+      packages: read # the token piped to the gateway lets the host pull the images
+```
+
+| Input | Default | |
+|---|---|---|
+| `environment` | (required) | GitHub environment with the SSH secrets and `DEPLOY_STACKS` |
+| `images` | (required) | JSON object service → `tag@sha256:digest`; the image is `ghcr.io/<owner>/<repo>-<service>` |
+
+Check: `<caller job name> / Deploy`.
+
 ## Actions
 
 Helpers of the reusable workflows; they write job summaries.
@@ -438,6 +479,8 @@ Helpers of the reusable workflows; they write job summaries.
 | `actions/license-summary` | a trivy license report (JSON) |
 | `actions/coverage-summary` | an istanbul `coverage-summary.json` |
 | `actions/image-scan` | a local container image: SBOM, vulnerability and license reports, optional gates (no summary) |
+| `actions/ssh-setup` | a host, user, known_hosts and private key: loads the key into `ssh-agent`, writes an ssh config (alias `deploy-target`, strict host keys) |
+| `actions/ssh-deploy` | an ssh config, stacks and images: deploys through the gateway |
 
 ## Versioning
 

@@ -1,0 +1,60 @@
+name: Deploy over SSH
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: >-
+          GitHub environment to deploy to. It holds the secrets SSH_HOST, SSH_USER, SSH_KNOWN_HOSTS, SSH_DEPLOY_KEY and the
+          variable DEPLOY_STACKS
+        type: string
+        required: true
+      images:
+        description: >-
+          JSON object service -> "tag@sha256:digest", deployed in this order, e.g.
+          {"server": "sha-1a2b3c4@sha256:…", "client": "sha-1a2b3c4@sha256:…"}
+        type: string
+        required: true
+    secrets:
+      SSH_HOST:
+        description: Host of the environment
+        required: true
+      SSH_USER:
+        description: CI user on the host
+        required: true
+      SSH_KNOWN_HOSTS:
+        description: known_hosts lines of the host
+        required: true
+      SSH_DEPLOY_KEY:
+        description: Private deploy key
+        required: true
+
+permissions: {}
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    timeout-minutes: 30
+    concurrency:
+      group: deploy-${{ github.repository }}-${{ inputs.environment }}
+      cancel-in-progress: false
+    permissions:
+      packages: read # the token piped to the gateway lets the host pull the images
+    steps:
+      - name: Set up ssh
+        id: ssh
+        uses: $/actions/ssh-setup
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          user: ${{ secrets.SSH_USER }}
+          known-hosts: ${{ secrets.SSH_KNOWN_HOSTS }}
+          private-key: ${{ secrets.SSH_DEPLOY_KEY }}
+      - name: Deploy
+        uses: $/actions/ssh-deploy
+        with:
+          config: ${{ steps.ssh.outputs.config }}
+          stacks: ${{ vars.DEPLOY_STACKS }}
+          images: ${{ inputs.images }}
+          token: ${{ github.token }}

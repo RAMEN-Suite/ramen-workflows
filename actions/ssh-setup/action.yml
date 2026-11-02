@@ -1,0 +1,34 @@
+name: SSH setup
+description: Load a deploy key into ssh-agent (never written to disk) and write an ssh config for one host that only accepts the given host keys
+
+inputs:
+  host:
+    description: Host name or address (the environment secret SSH_HOST)
+    required: true
+  user:
+    description: Login user (SSH_USER)
+    required: true
+  known-hosts:
+    description: known_hosts lines for the host (SSH_KNOWN_HOSTS); the only host keys ssh accepts
+    required: true
+  private-key:
+    description: Private key (SSH_DEPLOY_KEY); loaded into ssh-agent only
+    required: true
+
+outputs:
+  config:
+    description: "Path of the ssh config; connect with: ssh -F <config> deploy-target"
+    value: ${{ steps.setup.outputs.config }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up ssh
+      id: setup
+      shell: bash
+      env:
+        SSH_HOST: ${{ inputs.host }}
+        SSH_USER: ${{ inputs.user }}
+        SSH_KNOWN_HOSTS: ${{ inputs.known-hosts }}
+        SSH_PRIVATE_KEY: ${{ inputs.private-key }}
+      run: bash "$GITHUB_ACTION_PATH/setup.sh"
