@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here.
 
+## [0.2.4](https://github.com/RAMEN-Suite/ramen-workflows/compare/v0.2.3...v0.2.4) (2026-11-02)
+
+### Bug Fixes
+
+* do never fail on vulns; only report ([2f67b06](https://github.com/RAMEN-Suite/ramen-workflows/commit/2f67b06119e6aabbce0b4c3cd390c9097fcf894b))
+
 ## [0.2.3](https://github.com/RAMEN-Suite/ramen-workflows/compare/v0.2.2...v0.2.3) (2026-11-02)
 
 ### Features
