@@ -378,10 +378,11 @@ Checks: `Config lint / Dockerfile lint`, `Config lint / Misconfiguration scan`. 
 ### `container-check.yml` and `container-publish.yml`
 
 Both build an image and scan it with [`actions/image-scan`](#actions): a CycloneDX SBOM, a vulnerability report and a license report.
+Vulnerabilities are only reported (code scanning and the job summary), never gated: most come from the base image, and their fixes arrive through Renovate after the cooldown.
 The image fails on licenses matching `license-deny` (default `AGPL`): an image ships its OS, and Alpine alone brings GPL packages, so the stricter rule for the project's own dependencies lives in `supply-chain.yml`.
 
-- `container-check.yml` (pull requests): builds and scans, reports vulnerabilities without failing. No push token: only `contents: read` and `security-events: write`.
-- `container-publish.yml` (pushes): also fails on fixable `CRITICAL` vulnerabilities, then pushes all tags to `ghcr.io/<owner>/<repo>-<name>` and attaches build provenance and the SBOM as attestations. It needs `packages: write`, so it is a separate workflow: a pull request job never holds a push token. It refuses to run for `pull_request` events.
+- `container-check.yml` (pull requests): builds and scans. No push token: only `contents: read` and `security-events: write`.
+- `container-publish.yml` (pushes): builds and scans the same way, then pushes all tags to `ghcr.io/<owner>/<repo>-<name>` and attaches build provenance and the SBOM as attestations. It needs `packages: write`, so it is a separate workflow: a pull request job never holds a push token. It refuses to run for `pull_request` events.
 
 Pull requests, both images as a matrix:
 
@@ -563,7 +564,7 @@ Helpers of the reusable workflows; they write job summaries.
 | `actions/sarif-summary` | a SARIF report (trivy, gitleaks, semgrep) |
 | `actions/license-summary` | a trivy license report (JSON) |
 | `actions/coverage-summary` | an istanbul `coverage-summary.json` |
-| `actions/image-scan` | a local container image: SBOM, vulnerability and license reports, optional gates (no summary) |
+| `actions/image-scan` | a local container image: SBOM, vulnerability and license reports, license gate (no summary) |
 | `actions/ssh-setup` | a host, user, known_hosts and private key: loads the key into `ssh-agent`, writes an ssh config (alias `deploy-target`, strict host keys) |
 | `actions/ssh-deploy` | an ssh config, stacks and images: deploys through the gateway |
 

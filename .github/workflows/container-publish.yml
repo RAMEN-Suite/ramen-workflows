@@ -104,7 +104,6 @@ jobs:
         with:
           image: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
           name: ${{ inputs.name }}
-          fail-on-vulnerabilities: "true"
           license-deny: ${{ inputs.license-deny }}
           trivy-version: ${{ env.TRIVY_VERSION }}
       - name: Upload the image scan to code scanning

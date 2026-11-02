@@ -1,7 +1,7 @@
 name: Image scan
 description: >-
-  SBOM, vulnerability report and license report for a local container image, with optional gates.
-  The calling job uploads and summarizes the reports. Both reports are written before any gate runs.
+  SBOM, vulnerability report and license report for a local container image. Vulnerabilities are only reported;
+  licenses matching license-deny fail the image. The calling job uploads and summarizes the reports.
 
 inputs:
   image:
@@ -10,10 +10,6 @@ inputs:
   name:
     description: Short name used in the report file names, e.g. "client"
     required: true
-  fail-on-vulnerabilities:
-    description: '"true": fail on CRITICAL vulnerabilities that have a fix'
-    required: false
-    default: "false"
   license-deny:
     description: Regular expression (jq, case-insensitive) of license names that fail the scan
     required: false
@@ -101,17 +97,3 @@ runs:
           exit 1
         fi
         echo "No licenses matching '$DENY'."
-
-    - name: Fail on fixable CRITICAL vulnerabilities
-      if: inputs.fail-on-vulnerabilities == 'true'
-      uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-      with:
-        scan-type: image
-        image-ref: ${{ inputs.image }}
-        scanners: vuln
-        format: table
-        severity: "CRITICAL"
-        ignore-unfixed: true
-        exit-code: "1"
-        skip-setup-trivy: true
-        version: ${{ inputs.trivy-version }}
