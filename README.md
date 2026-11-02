@@ -228,6 +228,8 @@ Needs:
 - the environments `release` (variable `RELEASE_GITHUB_CLIENT_ID`, secret `RELEASE_APP_PRIVATE_KEY`, deployments from `main`) and `npm`;
 - the release App as a bypass actor on `main` and the `v*` tags. Releases run from `main` only.
 
+`npm-release.yml` runs in two jobs, so the release App key never meets npm or the build: `Version, build and tag` (npm, build, pack, attestations; no secrets) hands the release commit on as a git bundle, and `Push and release` (environment `release`, no npm) checks that the commit only changes `CHANGELOG.md`, `package.json` and `package-lock.json` files, then pushes it and creates the GitHub release.
+
 ```yaml
 name: Release
 
