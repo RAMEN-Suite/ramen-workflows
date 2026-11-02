@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented here.
 
+## [0.2.3](https://github.com/RAMEN-Suite/ramen-workflows/compare/v0.2.2...v0.2.3) (2026-11-02)
+
+### Features
+
+* add ssh deploy ([086cd5f](https://github.com/RAMEN-Suite/ramen-workflows/commit/086cd5f673da0e0e580830ff012457828c8f3fbd))
+* container publish, auto-back-merge and promote dev image to staging ([0b4a16a](https://github.com/RAMEN-Suite/ramen-workflows/commit/0b4a16a6f1cec0bcffdae2789b0781bf08208c03))
+* release docker apps ([adaa64c](https://github.com/RAMEN-Suite/ramen-workflows/commit/adaa64cb06a2fb70adf1ebb6d87f4580bd77fbcb))
+
+### Bug Fixes
+
+* make sure there are no npm steps inside the release environment ([f127362](https://github.com/RAMEN-Suite/ramen-workflows/commit/f12736251e52be37bd0318a6e3f96a851c752e85))
+
 ## [0.2.2](https://github.com/RAMEN-Suite/ramen-workflows/compare/v0.2.1...v0.2.2) (2026-11-01)
 
 ### Features
