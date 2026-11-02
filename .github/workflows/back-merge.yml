@@ -1,0 +1,43 @@
+name: Back-merge
+
+on:
+  workflow_call:
+    secrets:
+      RELEASE_APP_PRIVATE_KEY:
+        description: "Private key of the release App (its client ID comes from vars.RELEASE_GITHUB_CLIENT_ID)"
+        required: true
+
+permissions: {}
+
+jobs:
+  back-merge:
+    name: Merge main into dev
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read # checkout only; the push goes through the release App token
+    steps:
+      - name: Create an app token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.RELEASE_GITHUB_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write # push the merge to dev
+      - name: Checkout dev
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: dev
+          fetch-depth: 0 # the merge needs the history of both branches
+          persist-credentials: false
+      - name: Merge main into dev
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if ! git merge --no-ff --no-edit origin/main; then
+            echo "::error::main conflicts with dev. Merge it by hand: git switch -c back-merge origin/dev && git merge origin/main, resolve, push, open a PR into dev and merge it with a merge commit."
+            exit 1
+          fi
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:refs/heads/dev

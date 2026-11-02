@@ -1,0 +1,72 @@
+name: Promote
+
+on:
+  workflow_call:
+    inputs:
+      services:
+        description: "Images to deploy, space-separated, in this order, e.g. server client"
+        type: string
+        required: true
+      sha:
+        description: "Commit whose images to deploy (default: the commit the run is on, e.g. the dev HEAD)"
+        type: string
+        default: ""
+      environment:
+        description: "GitHub environment to deploy to"
+        type: string
+        default: staging
+    secrets:
+      SSH_HOST:
+        required: true
+      SSH_USER:
+        required: true
+      SSH_KNOWN_HOSTS:
+        required: true
+      SSH_DEPLOY_KEY:
+        required: true
+
+permissions: {}
+
+jobs:
+  images:
+    name: Find the images
+    runs-on: ubuntu-latest
+    permissions:
+      packages: read # read the image digests
+      attestations: read # verify the images
+    outputs:
+      images: ${{ steps.find.outputs.images }}
+    steps:
+      - name: Find and verify the images
+        id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SERVICES: ${{ inputs.services }}
+          SHA: ${{ inputs.sha || github.sha }}
+        run: |
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          images='{}'
+          for service in $SERVICES; do
+            image="ghcr.io/${GITHUB_REPOSITORY,,}-${service}"
+            tag="sha-${SHA:0:7}"
+            digest=$(docker buildx imagetools inspect "$image:$tag" --format '{{json .Manifest}}' | jq -r .digest)
+            gh attestation verify "oci://$image@$digest" --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow RAMEN-Suite/ramen-workflows/.github/workflows/container-publish.yml
+            images=$(jq -c --arg s "$service" --arg r "$tag@$digest" '. + {($s): $r}' <<<"$images")
+          done
+          echo "images=$images" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    name: ${{ inputs.environment }}
+    needs: [images]
+    uses: $/.github/workflows/deploy-ssh.yml
+    with:
+      environment: ${{ inputs.environment }}
+      images: ${{ needs.images.outputs.images }}
+    secrets:
+      SSH_HOST: ${{ secrets.SSH_HOST }}
+      SSH_USER: ${{ secrets.SSH_USER }}
+      SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+      SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
+    permissions:
+      packages: read # the token piped to the gateway lets the host pull the images

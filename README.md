@@ -20,6 +20,8 @@ Shared GitHub Actions for the RAMEN-Suite repositories.
 | [`container-check.yml`](#container-checkyml-and-container-publishyml) | build and scan a container image (pull requests) |
 | [`container-publish.yml`](#container-checkyml-and-container-publishyml) | build, scan, push and attest a container image |
 | [`deploy-ssh.yml`](#deploy-sshyml) | deploy images to an environment through the deploy gateway (ssh) |
+| [`promote.yml`](#promoteyml) | deploy the images of an existing commit, e.g. the dev HEAD to staging |
+| [`back-merge.yml`](#back-mergeyml) | merge `main` into `dev` after a release |
 
 ## Usage
 
@@ -425,6 +427,7 @@ jobs:
 | `context` | `.` | Build context |
 | `tags` | (required, publish only) | Tag rules for [docker/metadata-action](https://github.com/docker/metadata-action#tags-input) |
 | `license-deny` | `AGPL` | Regular expression (case-insensitive) of license names that fail the image |
+| `ref` | | Commit, branch or tag to build (publish only), e.g. the release tag; `sha-<commit>` then names that commit |
 
 `container-publish.yml` outputs: `image`, `digest`, `sha-tag` (the `sha-<short commit>` tag if the tag rules create one).
 Checks: `<caller job name> / Build and scan`, `<caller job name> / Build, scan and push`. Code scanning category `trivy-image-<name>`.
@@ -468,6 +471,50 @@ jobs:
 | `images` | (required) | JSON object service → `tag@sha256:digest`; the image is `ghcr.io/<owner>/<repo>-<service>` |
 
 Check: `<caller job name> / Deploy`.
+
+### `promote.yml`
+
+Deploys the images of an existing commit to an environment (default `staging`): it finds `ghcr.io/<owner>/<repo>-<service>:sha-<commit>`, verifies the attestation (a tag can be moved, so only images built by `container-publish.yml` for the repository pass), then calls [`deploy-ssh.yml`](#deploy-sshyml). Without `sha`, it takes the commit the run is on, so a manual run on `dev` promotes the dev HEAD.
+
+```yaml
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Commit to promote (default: the dev HEAD)"
+
+jobs:
+  staging:
+    name: Promote
+    uses: RAMEN-Suite/ramen-workflows/.github/workflows/promote.yml@<full commit sha> # vX.Y.Z
+    with:
+      services: server client
+      sha: ${{ inputs.sha }}
+    secrets:
+      SSH_HOST: ${{ secrets.SSH_HOST }}
+      SSH_USER: ${{ secrets.SSH_USER }}
+      SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+      SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
+    permissions:
+      packages: read # read and pull the images
+      attestations: read # verify the images
+```
+
+### `back-merge.yml`
+
+Merges `main` into `dev` with a merge commit, pushed by the release App (exempt from the `dev` ruleset). On a conflict it fails and says how to merge by hand: a branch off `dev`, `git merge origin/main`, resolve, then a pull request into `dev` merged with a merge commit. Runs in the environment `release` (`RELEASE_GITHUB_CLIENT_ID`, `RELEASE_APP_PRIVATE_KEY`).
+
+```yaml
+jobs:
+  back-merge:
+    name: Back-merge
+    needs: [release]
+    uses: RAMEN-Suite/ramen-workflows/.github/workflows/back-merge.yml@<full commit sha> # vX.Y.Z
+    secrets:
+      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+    permissions:
+      contents: read # checkout; the push goes through the App token
+```
 
 ## Actions
 
