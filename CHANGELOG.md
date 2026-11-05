@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here.
 
+## [0.2.5](https://github.com/RAMEN-Suite/ramen-workflows/compare/v0.2.4...v0.2.5) (2026-11-05)
+
+### Bug Fixes
+
+* write scan summaries only once ([932dea4](https://github.com/RAMEN-Suite/ramen-workflows/commit/932dea4f4dbec14a0eee387b1a4a650426bf64bb))
+
 ## [0.2.4](https://github.com/RAMEN-Suite/ramen-workflows/compare/v0.2.3...v0.2.4) (2026-11-02)
 
 ### Bug Fixes
