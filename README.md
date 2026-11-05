@@ -382,7 +382,7 @@ Vulnerabilities are only reported (code scanning and the job summary), never gat
 The image fails on licenses matching `license-deny` (default `AGPL`): an image ships its OS, and Alpine alone brings GPL packages, so the stricter rule for the project's own dependencies lives in `supply-chain.yml`.
 
 - `container-check.yml` (pull requests): builds and scans. No push token: only `contents: read` and `security-events: write`.
-- `container-publish.yml` (pushes): builds and scans the same way, then pushes all tags to `ghcr.io/<owner>/<repo>-<name>` and attaches build provenance and the SBOM as attestations. It needs `packages: write`, so it is a separate workflow: a pull request job never holds a push token. It refuses to run for `pull_request` events.
+- `container-publish.yml` (pushes): builds and scans the same way (license gate, SBOM), then pushes all tags to `ghcr.io/<owner>/<repo>-<name>` and attaches build provenance and the SBOM as attestations. It needs `packages: write`, so it is a separate workflow: a pull request job never holds a push token. It refuses to run for `pull_request` events. It writes only its push summary; the scan reports stay in its artifact. Run `container-check.yml` in the same run (e.g. in the CI it calls first) for the summaries and code scanning.
 
 Pull requests, both images as a matrix:
 
@@ -420,7 +420,6 @@ jobs:
       packages: write # push the image and its attestations
       id-token: write # required to sign the attestations
       attestations: write # required to persist the attestations
-      security-events: write # required for uploading the image scan to code scanning
       artifact-metadata: write # actions/attest records the pushed image as an artifact of the repository
 ```
 

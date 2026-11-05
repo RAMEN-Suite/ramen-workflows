@@ -53,7 +53,6 @@ jobs:
       packages: write # push the image to ghcr.io and attach the attestations to it
       id-token: write # required to sign the provenance and SBOM attestations
       attestations: write # required to persist the attestations
-      security-events: write # required for uploading the image scan to code scanning
       artifact-metadata: write # actions/attest records the pushed image as an artifact of this repository
     outputs:
       image: ${{ steps.image.outputs.name }}
@@ -106,25 +105,6 @@ jobs:
           name: ${{ inputs.name }}
           license-deny: ${{ inputs.license-deny }}
           trivy-version: ${{ env.TRIVY_VERSION }}
-      - name: Upload the image scan to code scanning
-        if: >-
-          always() && github.event.repository.visibility == 'public'
-          && hashFiles(format('trivy-image-{0}.sarif', inputs.name)) != ''
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
-        with:
-          sarif_file: trivy-image-${{ inputs.name }}.sarif
-          category: trivy-image-${{ inputs.name }}
-      - name: Write vulnerability summary
-        if: always()
-        uses: $/actions/sarif-summary
-        with:
-          sarif-file: trivy-image-${{ inputs.name }}.sarif
-          title: 🐳 Trivy image (${{ inputs.name }})
-      - name: Write license summary
-        if: always()
-        uses: $/actions/license-summary
-        with:
-          report-file: licenses-${{ inputs.name }}.json
       - name: Log in to ghcr.io
         uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:

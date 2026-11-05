@@ -29,5 +29,4 @@ jobs:
       packages: write # push the fixture image and its attestations
       id-token: write # required to sign the attestations
       attestations: write # required to persist the attestations
-      security-events: write # required for uploading the image scan to code scanning
       artifact-metadata: write # actions/attest records the pushed image as an artifact of this repository
