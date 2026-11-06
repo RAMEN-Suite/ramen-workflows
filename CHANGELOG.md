@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here.
 
+## [0.2.6](https://github.com/RAMEN-Suite/ramen-workflows/compare/v0.2.5...v0.2.6) (2026-11-06)
+
+### Bug Fixes
+
+* only release once ([2d300ed](https://github.com/RAMEN-Suite/ramen-workflows/commit/2d300edd30a96dcf59c4c76bc6c6ddfdcb18da3f))
+
 ## [0.2.5](https://github.com/RAMEN-Suite/ramen-workflows/compare/v0.2.4...v0.2.5) (2026-11-05)
 
 ### Bug Fixes
