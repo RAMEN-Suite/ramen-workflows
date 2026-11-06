@@ -525,10 +525,11 @@ Releases a hosted app (client/server images, deployed by the caller) from `main`
 
 Job `Version and notes`, without secrets (it runs third-party npm code):
 
-1. `npm ci` at the root (it needs `commit-and-tag-version` and, with `notices`, `generate-license-file` as devDependencies).
-2. For each directory in `notices`: `npm ci` there and regenerate `<dir>/NOTICES.md` (third-party licenses stay part of the source).
-3. `commit-and-tag-version --commit-all`: version bump, `CHANGELOG.md` and the notices in one commit `chore(release): X.Y.Z [skip ci]`, tag `vX.Y.Z`. `[skip ci]`: the push starts no workflows.
-4. Hands the commit and tag on as a git bundle (artifact).
+1. Fails if the commit already carries a `v*` tag and `release-as` is empty: the second guard next to `[skip ci]` against releasing a release commit again (also catches a manual run right after a release).
+2. `npm ci` at the root (it needs `commit-and-tag-version` and, with `notices`, `generate-license-file` as devDependencies).
+3. For each directory in `notices`: `npm ci` there and regenerate `<dir>/NOTICES.md` (third-party licenses stay part of the source).
+4. `commit-and-tag-version --commit-all`: version bump, `CHANGELOG.md` and the notices in one commit `chore(release): X.Y.Z [skip ci]`, tag `vX.Y.Z`. `[skip ci]`: the push starts no workflows.
+5. Hands the commit and tag on as a git bundle (artifact).
 
 Job `Push and release`, in the environment `release` (`RELEASE_GITHUB_CLIENT_ID`, `RELEASE_APP_PRIVATE_KEY`, deploys only from `main`), with no npm at all: it checks that the release commit only changes `CHANGELOG.md`, `package.json` and `NOTICES.md` files, then the release App pushes commit and tag atomically to `main` and creates the GitHub release with the changelog section. Output: `version`. The caller builds the images from `v<version>` (`container-publish.yml` with `ref`), deploys them and back-merges.
 
@@ -551,7 +552,7 @@ jobs:
 | Input | Default | |
 |---|---|---|
 | `notices` | | Directories whose `NOTICES.md` is regenerated, space-separated |
-| `release-as` | | Force a version `X.Y.Z` |
+| `release-as` | | Force a version `X.Y.Z`; also releases a commit that already carries a tag |
 | `dry-run` | `false` | Bump and build the notes, push and release nothing |
 
 ## Actions
