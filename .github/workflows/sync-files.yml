@@ -1,0 +1,87 @@
+name: Sync files over SSH
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: >-
+          GitHub environment to sync to. It holds the secrets SSH_HOST, SSH_USER, SSH_KNOWN_HOSTS, SSH_RSYNC_KEY and, for
+          restarts, SSH_DEPLOY_KEY
+        type: string
+        required: true
+      transfers:
+        description: >-
+          JSON list of transfers, each {"from": "<directory in the repository>", "paths": ["<file or directory in from>", …],
+          "to": "<directory on the host, relative to the rsync root>", "delete": <bool, optional>,
+          "restart": ["<stack> <service>", …] (optional: restarted through the deploy gateway when this transfer changed
+          something)}
+        type: string
+        required: true
+    secrets:
+      SSH_HOST:
+        description: Host of the environment
+        required: true
+      SSH_USER:
+        description: CI user on the host
+        required: true
+      SSH_KNOWN_HOSTS:
+        description: known_hosts lines of the host
+        required: true
+      SSH_RSYNC_KEY:
+        description: Private key pinned to rrsync on the host
+        required: true
+      SSH_DEPLOY_KEY:
+        description: Private deploy key; only needed when a transfer has restarts
+        required: false
+
+permissions: {}
+
+jobs:
+  sync:
+    name: Sync
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    timeout-minutes: 15
+    concurrency:
+      group: sync-${{ github.repository }}-${{ inputs.environment }}
+      cancel-in-progress: false
+    permissions:
+      contents: read # required for actions/checkout to fetch repo contents if this repo is private
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up ssh for rsync
+        id: rsync
+        uses: $/actions/ssh-setup
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          user: ${{ secrets.SSH_USER }}
+          known-hosts: ${{ secrets.SSH_KNOWN_HOSTS }}
+          private-key: ${{ secrets.SSH_RSYNC_KEY }}
+      - name: Sync
+        id: sync
+        uses: $/actions/ssh-sync
+        with:
+          config: ${{ steps.rsync.outputs.config }}
+          transfers: ${{ inputs.transfers }}
+      - name: Set up ssh for the deploy gateway
+        id: gateway
+        if: steps.sync.outputs.restart != ''
+        uses: $/actions/ssh-setup
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          user: ${{ secrets.SSH_USER }}
+          known-hosts: ${{ secrets.SSH_KNOWN_HOSTS }}
+          private-key: ${{ secrets.SSH_DEPLOY_KEY }}
+      - name: Restart
+        if: steps.sync.outputs.restart != ''
+        env:
+          SSH_CONFIG: ${{ steps.gateway.outputs.config }}
+          RESTART: ${{ steps.sync.outputs.restart }}
+        run: |
+          while read -r stack service; do
+            echo "Restarting $service in $stack"
+            ssh -n -F "$SSH_CONFIG" deploy-target restart "$stack" "$service"
+          done <<<"$RESTART"

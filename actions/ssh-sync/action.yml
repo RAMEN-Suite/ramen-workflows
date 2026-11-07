@@ -1,0 +1,28 @@
+name: SSH sync
+description: Copy directories and files to the host with rsync (rrsync on the host) and report which stacks need a restart because their files changed
+
+inputs:
+  config:
+    description: ssh config from actions/ssh-setup with the rsync key (host alias deploy-target)
+    required: true
+  transfers:
+    description: >-
+      JSON list of transfers, each {"from": "<directory in the repository>", "paths": ["<file or directory in from>", …],
+      "to": "<directory on the host, relative to the rsync root>", "delete": <bool, optional>,
+      "restart": ["<stack> <service>", …] (optional: restarted when this transfer changed something)}
+
+outputs:
+  restart:
+    description: Newline-separated "<stack> <service>" entries of the transfers that changed files on the host
+    value: ${{ steps.sync.outputs.restart }}
+
+runs:
+  using: composite
+  steps:
+    - name: Sync
+      id: sync
+      shell: bash
+      env:
+        SSH_CONFIG: ${{ inputs.config }}
+        TRANSFERS: ${{ inputs.transfers }}
+      run: bash "$GITHUB_ACTION_PATH/sync.sh"

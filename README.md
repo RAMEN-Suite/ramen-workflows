@@ -20,6 +20,7 @@ Shared GitHub Actions for the RAMEN-Suite repositories.
 | [`container-check.yml`](#container-checkyml-and-container-publishyml) | build and scan a container image (pull requests) |
 | [`container-publish.yml`](#container-checkyml-and-container-publishyml) | build, scan, push and attest a container image |
 | [`deploy-ssh.yml`](#deploy-sshyml) | deploy images to an environment through the deploy gateway (ssh) |
+| [`sync-files.yml`](#sync-filesyml) | copy files from the repository to an environment with rsync, restart what reads them |
 | [`promote.yml`](#promoteyml) | deploy the images of an existing commit, e.g. the dev HEAD to staging |
 | [`back-merge.yml`](#back-mergeyml) | merge `main` into `dev` after a release |
 | [`release-hosted.yml`](#release-hostedyml) | version, notices, tag and GitHub release of a hosted app (images and deploy in the caller) |
@@ -475,6 +476,48 @@ jobs:
 
 Check: `<caller job name> / Deploy`.
 
+### `sync-files.yml`
+
+Copies files from the repository to one GitHub environment with rsync, for content that the apps read from the host
+(project configuration, guidelines). The host pins the rsync key to `rrsync -wo <files dir>`, so paths are relative to
+that directory and CI can only write there. Everything host-specific comes from the environment, written by the
+`deploy-gateway` Ansible role (repository `keys: [deploy, rsync]`): `SSH_HOST`, `SSH_USER`, `SSH_KNOWN_HOSTS`,
+`SSH_RSYNC_KEY` and, for restarts, `SSH_DEPLOY_KEY`.
+
+1. Each transfer rsyncs `paths` from `from` to `to` (`--checksum`, `--mkpath`; `delete: true` also removes files that
+   no longer exist in the repository). Content decides, not timestamps: unchanged files are neither sent nor reported.
+2. A transfer that changed something on the host restarts its `restart` entries (`<stack> <service>`) through the
+   deploy gateway, with a second ssh agent holding only the deploy key. A re-run ("Re-run jobs") restarts them even
+   without changes, because the failed or cancelled attempt may have copied the files but not restarted.
+
+Every run syncs the full state of its commit, so a newer run waiting for the environment may replace an older one
+without losing a change. One sync per environment runs at a time; the job times out after 15 minutes.
+
+```yaml
+jobs:
+  sync:
+    name: Sync
+    uses: RAMEN-Suite/ramen-workflows/.github/workflows/sync-files.yml@<full commit sha> # vX.Y.Z
+    with:
+      environment: staging
+      transfers: >-
+        [{"from": "projects/abbw/shoyu", "paths": ["config", "i18n"], "to": "shoyu/", "delete": true},
+         {"from": "projects/abbw", "paths": ["project.gcore.json"], "to": "gcore/", "restart": ["dev/tori server"]}]
+    secrets:
+      SSH_HOST: ${{ secrets.SSH_HOST }}
+      SSH_USER: ${{ secrets.SSH_USER }}
+      SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+      SSH_RSYNC_KEY: ${{ secrets.SSH_RSYNC_KEY }}
+      SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
+    permissions:
+      contents: read # checkout
+```
+
+| Input | Default | |
+|---|---|---|
+| `environment` | | GitHub environment with the SSH secrets |
+| `transfers` | | JSON list of `{from, paths, to, delete, restart}` |
+
 ### `promote.yml`
 
 Deploys the images of an existing commit to an environment (default `staging`): it finds `ghcr.io/<owner>/<repo>-<service>:sha-<commit>`, verifies the attestation (a tag can be moved, so only images built by `container-publish.yml` for the repository pass), then calls [`deploy-ssh.yml`](#deploy-sshyml). Without `sha`, it takes the commit the run is on, so a manual run on `dev` promotes the dev HEAD.
@@ -567,6 +610,7 @@ Helpers of the reusable workflows; they write job summaries.
 | `actions/image-scan` | a local container image: SBOM, vulnerability and license reports, license gate (no summary) |
 | `actions/ssh-setup` | a host, user, known_hosts and private key: loads the key into `ssh-agent`, writes an ssh config (alias `deploy-target`, strict host keys) |
 | `actions/ssh-deploy` | an ssh config, stacks and images: deploys through the gateway |
+| `actions/ssh-sync` | an ssh config (rsync key) and transfers: rsyncs them, outputs the restarts of transfers that changed something |
 
 ## Versioning
 
