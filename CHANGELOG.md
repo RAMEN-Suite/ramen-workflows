@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here.
 
+## [0.2.8](https://github.com/RAMEN-Suite/ramen-workflows/compare/v0.2.7...v0.2.8) (2026-11-07)
+
+### Features
+
+* optionally rebuild container after file sync ([648f5a3](https://github.com/RAMEN-Suite/ramen-workflows/commit/648f5a37defed84d23c2c976973f6500c93b6536))
+
 ## [0.2.7](https://github.com/RAMEN-Suite/ramen-workflows/compare/v0.2.6...v0.2.7) (2026-11-07)
 
 ### Features
