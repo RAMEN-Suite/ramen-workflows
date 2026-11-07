@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here.
 
+## [0.2.7](https://github.com/RAMEN-Suite/ramen-workflows/compare/v0.2.6...v0.2.7) (2026-11-07)
+
+### Features
+
+* sync files over ssh ([3ea4122](https://github.com/RAMEN-Suite/ramen-workflows/commit/3ea4122d369a2e63ab46c7c93640b800f73e210c))
+
 ## [0.2.6](https://github.com/RAMEN-Suite/ramen-workflows/compare/v0.2.5...v0.2.6) (2026-11-06)
 
 ### Bug Fixes
