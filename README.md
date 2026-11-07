@@ -20,7 +20,7 @@ Shared GitHub Actions for the RAMEN-Suite repositories.
 | [`container-check.yml`](#container-checkyml-and-container-publishyml) | build and scan a container image (pull requests) |
 | [`container-publish.yml`](#container-checkyml-and-container-publishyml) | build, scan, push and attest a container image |
 | [`deploy-ssh.yml`](#deploy-sshyml) | deploy images to an environment through the deploy gateway (ssh) |
-| [`sync-files.yml`](#sync-filesyml) | copy files from the repository to an environment with rsync, restart what reads them |
+| [`sync-files.yml`](#sync-filesyml) | copy files from the repository to an environment with rsync, restart or recreate what reads them |
 | [`promote.yml`](#promoteyml) | deploy the images of an existing commit, e.g. the dev HEAD to staging |
 | [`back-merge.yml`](#back-mergeyml) | merge `main` into `dev` after a release |
 | [`release-hosted.yml`](#release-hostedyml) | version, notices, tag and GitHub release of a hosted app (images and deploy in the caller) |
@@ -482,12 +482,15 @@ Copies files from the repository to one GitHub environment with rsync, for conte
 (project configuration, guidelines). The host pins the rsync key to `rrsync -wo <files dir>`, so paths are relative to
 that directory and CI can only write there. Everything host-specific comes from the environment, written by the
 `deploy-gateway` Ansible role (repository `keys: [deploy, rsync]`): `SSH_HOST`, `SSH_USER`, `SSH_KNOWN_HOSTS`,
-`SSH_RSYNC_KEY` and, for restarts, `SSH_DEPLOY_KEY`.
+`SSH_RSYNC_KEY` and, for restarts and ups, `SSH_DEPLOY_KEY`.
 
 1. Each transfer rsyncs `paths` from `from` to `to` (`--checksum`, `--mkpath`; `delete: true` also removes files that
    no longer exist in the repository). Content decides, not timestamps: unchanged files are neither sent nor reported.
-2. A transfer that changed something on the host restarts its `restart` entries (`<stack> <service>`) through the
-   deploy gateway, with a second ssh agent holding only the deploy key. A re-run ("Re-run jobs") restarts them even
+2. A transfer that changed something on the host runs its `up` entries, then its `restart` entries (each
+   `<stack> [service]`, without a service the whole stack) through the deploy gateway, with a second ssh agent holding
+   only the deploy key. `restart` keeps the container and its environment: use it for files the app reads at start
+   (configuration, guidelines). `up` (`docker compose up -d --pull never`) recreates the container when its compose
+   configuration changed: use it for files compose reads, such as env files. A re-run ("Re-run jobs") runs them even
    without changes, because the failed or cancelled attempt may have copied the files but not restarted.
 
 Every run syncs the full state of its commit, so a newer run waiting for the environment may replace an older one
@@ -502,7 +505,8 @@ jobs:
       environment: staging
       transfers: >-
         [{"from": "projects/abbw/shoyu", "paths": ["config", "i18n"], "to": "shoyu/", "delete": true},
-         {"from": "projects/abbw", "paths": ["project.gcore.json"], "to": "gcore/", "restart": ["dev/tori server"]}]
+         {"from": "projects/abbw", "paths": ["project.gcore.json"], "to": "gcore/", "restart": ["dev/tori server"]},
+         {"from": "config/dev", "paths": ["tori.env"], "to": "_config/dev/", "up": ["dev/tori"]}]
     secrets:
       SSH_HOST: ${{ secrets.SSH_HOST }}
       SSH_USER: ${{ secrets.SSH_USER }}
@@ -516,7 +520,7 @@ jobs:
 | Input | Default | |
 |---|---|---|
 | `environment` | | GitHub environment with the SSH secrets |
-| `transfers` | | JSON list of `{from, paths, to, delete, restart}` |
+| `transfers` | | JSON list of `{from, paths, to, delete, restart, up}` |
 
 ### `promote.yml`
 
@@ -610,7 +614,7 @@ Helpers of the reusable workflows; they write job summaries.
 | `actions/image-scan` | a local container image: SBOM, vulnerability and license reports, license gate (no summary) |
 | `actions/ssh-setup` | a host, user, known_hosts and private key: loads the key into `ssh-agent`, writes an ssh config (alias `deploy-target`, strict host keys) |
 | `actions/ssh-deploy` | an ssh config, stacks and images: deploys through the gateway |
-| `actions/ssh-sync` | an ssh config (rsync key) and transfers: rsyncs them, outputs the restarts of transfers that changed something |
+| `actions/ssh-sync` | an ssh config (rsync key) and transfers: rsyncs them, outputs the restarts and ups of transfers that changed something |
 
 ## Versioning
 

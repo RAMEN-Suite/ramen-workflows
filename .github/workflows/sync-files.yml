@@ -6,15 +6,16 @@ on:
       environment:
         description: >-
           GitHub environment to sync to. It holds the secrets SSH_HOST, SSH_USER, SSH_KNOWN_HOSTS, SSH_RSYNC_KEY and, for
-          restarts, SSH_DEPLOY_KEY
+          restarts and ups, SSH_DEPLOY_KEY
         type: string
         required: true
       transfers:
         description: >-
           JSON list of transfers, each {"from": "<directory in the repository>", "paths": ["<file or directory in from>", …],
           "to": "<directory on the host, relative to the rsync root>", "delete": <bool, optional>,
-          "restart": ["<stack> <service>", …] (optional: restarted through the deploy gateway when this transfer changed
-          something)}
+          "restart": ["<stack> [service]", …] (optional: restarted through the deploy gateway when this transfer changed
+          something), "up": ["<stack> [service]", …] (optional: recreated through the deploy gateway with `docker compose
+          up` when this transfer changed something, for files compose reads, such as env files)}
         type: string
         required: true
     secrets:
@@ -31,7 +32,7 @@ on:
         description: Private key pinned to rrsync on the host
         required: true
       SSH_DEPLOY_KEY:
-        description: Private deploy key; only needed when a transfer has restarts
+        description: Private deploy key; only needed when a transfer has restarts or ups
         required: false
 
 permissions: {}
@@ -68,13 +69,23 @@ jobs:
           transfers: ${{ inputs.transfers }}
       - name: Set up ssh for the deploy gateway
         id: gateway
-        if: steps.sync.outputs.restart != ''
+        if: steps.sync.outputs.restart != '' || steps.sync.outputs.up != ''
         uses: $/actions/ssh-setup
         with:
           host: ${{ secrets.SSH_HOST }}
           user: ${{ secrets.SSH_USER }}
           known-hosts: ${{ secrets.SSH_KNOWN_HOSTS }}
           private-key: ${{ secrets.SSH_DEPLOY_KEY }}
+      - name: Up
+        if: steps.sync.outputs.up != ''
+        env:
+          SSH_CONFIG: ${{ steps.gateway.outputs.config }}
+          UP: ${{ steps.sync.outputs.up }}
+        run: |
+          while read -r stack service; do
+            echo "Recreating ${service:-all services} in $stack"
+            ssh -n -F "$SSH_CONFIG" deploy-target up "$stack" "$service"
+          done <<<"$UP"
       - name: Restart
         if: steps.sync.outputs.restart != ''
         env:
@@ -82,6 +93,6 @@ jobs:
           RESTART: ${{ steps.sync.outputs.restart }}
         run: |
           while read -r stack service; do
-            echo "Restarting $service in $stack"
+            echo "Restarting ${service:-all services} in $stack"
             ssh -n -F "$SSH_CONFIG" deploy-target restart "$stack" "$service"
           done <<<"$RESTART"

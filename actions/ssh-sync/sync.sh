@@ -10,6 +10,7 @@ rerun=false
 if [ "${GITHUB_RUN_ATTEMPT:-1}" -gt 1 ]; then rerun=true; fi
 
 restart=""
+up=""
 while IFS= read -r transfer; do
   from=$(jq -r '.from' <<<"$transfer")
   to=$(jq -r '.to' <<<"$transfer")
@@ -28,6 +29,7 @@ while IFS= read -r transfer; do
   fi
   if [ -n "$changes" ] || [ "$rerun" = true ]; then
     restart+="$(jq -r '.restart // [] | .[]' <<<"$transfer")"$'\n'
+    up+="$(jq -r '.up // [] | .[]' <<<"$transfer")"$'\n'
   fi
   echo "::endgroup::"
 done < <(jq -c '.[]' <<<"$TRANSFERS")
@@ -35,5 +37,8 @@ done < <(jq -c '.[]' <<<"$TRANSFERS")
 {
   echo "restart<<EOF"
   printf '%s' "$restart" | sort -u | sed '/^$/d'
+  echo "EOF"
+  echo "up<<EOF"
+  printf '%s' "$up" | sort -u | sed '/^$/d'
   echo "EOF"
 } >>"$GITHUB_OUTPUT"
