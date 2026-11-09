@@ -54,13 +54,13 @@ jobs:
           args: git --redact --report-format sarif --report-path gitleaks.sarif .
       - name: Upload trivy report to security tab
         if: always() && github.event.repository.visibility == 'public'
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: trivy-results.sarif
           category: trivy-fs
       - name: Upload gitleaks report to security tab
         if: always() && github.event.repository.visibility == 'public'
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: gitleaks.sarif
           category: gitleaks
@@ -106,7 +106,7 @@ jobs:
         run: semgrep scan --severity ERROR --error --sarif --output semgrep.sarif
       - name: Upload Semgrep results to Github Security tab
         if: always() && github.event.repository.visibility == 'public'
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: semgrep.sarif
           category: sast
@@ -138,12 +138,12 @@ jobs:
         with:
           persist-credentials: false
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           languages: ${{ inputs.codeql-languages }}
           build-mode: none
           config-file: ${{ inputs.codeql-config-file }}
       - name: Analyze
-        uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           category: /language:${{ inputs.codeql-languages }}
