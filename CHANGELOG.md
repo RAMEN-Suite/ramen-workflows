@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here.
 
+## [0.2.12](https://github.com/RAMEN-Suite/ramen-workflows/compare/v0.2.11...v0.2.12) (2026-11-24)
+
+### Features
+
+* deploy version fragments ([b048c1e](https://github.com/RAMEN-Suite/ramen-workflows/commit/b048c1eb65ec6024d450cbb7488c16366e7f99c2))
+
 ## [0.2.11](https://github.com/RAMEN-Suite/ramen-workflows/compare/v0.2.10...v0.2.11) (2026-11-22)
 
 ## [0.2.10](https://github.com/RAMEN-Suite/ramen-workflows/compare/v0.2.9...v0.2.10) (2026-11-09)
