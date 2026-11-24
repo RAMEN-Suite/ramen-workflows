@@ -20,6 +20,7 @@ Shared GitHub Actions for the RAMEN-Suite repositories.
 | [`container-check.yml`](#container-checkyml-and-container-publishyml) | build and scan a container image (pull requests) |
 | [`container-publish.yml`](#container-checkyml-and-container-publishyml) | build, scan, push and attest a container image |
 | [`deploy-ssh.yml`](#deploy-sshyml) | deploy images to an environment through the deploy gateway (ssh) |
+| [`deploy-fragment.yml`](#deploy-fragmentyml) | deploy the third-party images pinned in a version fragment (neo4j, traefik) through the deploy gateway |
 | [`sync-files.yml`](#sync-filesyml) | copy files from the repository to an environment with rsync, restart or recreate what reads them |
 | [`promote.yml`](#promoteyml) | deploy the images of an existing commit, e.g. the dev HEAD to staging |
 | [`back-merge.yml`](#back-mergeyml) | merge `main` into `dev` after a release |
@@ -476,6 +477,60 @@ jobs:
 
 Check: `<caller job name> / Deploy`.
 
+### `deploy-fragment.yml`
+
+Deploys the images pinned in a version fragment to stacks of one GitHub environment through the deploy gateway, for
+third-party images such as neo4j or traefik. A version fragment is a small compose file that only pins
+`services.<name>.image` (`<image>:<tag>@sha256:<digest>`); Renovate keeps it current, and the stack's real compose file
+on the host names the image. The gateway gets only the version: `ssh deploy <stack> <service> <tag>[@<digest>]`.
+
+1. Reads the fragment and takes `services` in the given order (default: every service, in fragment order). A service
+   without `image`, or an image without a tag, fails the job.
+2. Deploys each service to each stack through [`actions/ssh-deploy`](#actions) without a registry token (public
+   images). The gateway waits for health and rolls a service back by itself if it doesn't become healthy; the first
+   failure stops the job.
+
+Stacks are an input because they belong to the fragment, not to the repository (`DEPLOY_STACKS` lists the stacks named
+after the repository). Secrets as in [`deploy-ssh.yml`](#deploy-sshyml), passed by name. One deploy per environment
+runs at a time (shared with `deploy-ssh.yml`); the job times out after 30 minutes. Trigger the caller on changes of the
+fragment and deploy the whole fragment each run: a run that GitHub cancels while it waits then loses nothing.
+
+```yaml
+on:
+  push:
+    branches: [main]
+    paths: [versions/neo4j/prod.yml, .github/workflows/neo4j-prod.yml]
+
+jobs:
+  deploy:
+    name: Deploy (${{ matrix.environment }})
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: [antjebrons, riserver, sbwi]
+    uses: RAMEN-Suite/ramen-workflows/.github/workflows/deploy-fragment.yml@<full commit sha> # vX.Y.Z
+    with:
+      environment: ${{ matrix.environment }}
+      fragment: versions/neo4j/prod.yml
+      stacks: pub/neo4j ed/neo4j
+    secrets:
+      SSH_HOST: ${{ secrets.SSH_HOST }}
+      SSH_USER: ${{ secrets.SSH_USER }}
+      SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+      SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
+    permissions:
+      contents: read # checkout
+```
+
+| Input | Default | |
+|---|---|---|
+| `environment` | (required) | GitHub environment with the SSH secrets |
+| `fragment` | (required) | path of the version fragment |
+| `stacks` | (required) | stacks on the host, space-separated |
+| `services` | all, in fragment order | services to deploy, space-separated, in this order |
+
+Check: `<caller job name> / Deploy`.
+
 ### `sync-files.yml`
 
 Copies files from the repository to one GitHub environment with rsync, for content that the apps read from the host
@@ -613,7 +668,7 @@ Helpers of the reusable workflows; they write job summaries.
 | `actions/coverage-summary` | an istanbul `coverage-summary.json` |
 | `actions/image-scan` | a local container image: SBOM, vulnerability and license reports, license gate (no summary) |
 | `actions/ssh-setup` | a host, user, known_hosts and private key: loads the key into `ssh-agent`, writes an ssh config (alias `deploy-target`, strict host keys) |
-| `actions/ssh-deploy` | an ssh config, stacks and images: deploys through the gateway |
+| `actions/ssh-deploy` | an ssh config, stacks, images and an optional registry token: deploys through the gateway |
 | `actions/ssh-sync` | an ssh config (rsync key) and transfers: rsyncs them, outputs the restarts and ups of transfers that changed something |
 
 ## Versioning

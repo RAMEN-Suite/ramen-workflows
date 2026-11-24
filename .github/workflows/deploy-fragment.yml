@@ -1,0 +1,103 @@
+name: Deploy version fragment
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: GitHub environment to deploy to. It holds the secrets SSH_HOST, SSH_USER, SSH_KNOWN_HOSTS and SSH_DEPLOY_KEY
+        type: string
+        required: true
+      fragment:
+        description: Path of the version fragment in the repository, e.g. versions/neo4j/prod.yml
+        type: string
+        required: true
+      stacks:
+        description: Stacks on the host to deploy to, space-separated, e.g. "pub/neo4j ed/neo4j"
+        type: string
+        required: true
+      services:
+        description: Services of the fragment to deploy, space-separated, in this order (default all, in fragment order)
+        type: string
+        required: false
+        default: ""
+    secrets:
+      SSH_HOST:
+        description: Host of the environment
+        required: true
+      SSH_USER:
+        description: CI user on the host
+        required: true
+      SSH_KNOWN_HOSTS:
+        description: known_hosts lines of the host
+        required: true
+      SSH_DEPLOY_KEY:
+        description: Private deploy key
+        required: true
+
+permissions: {}
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    timeout-minutes: 30
+    concurrency:
+      group: deploy-${{ github.repository }}-${{ inputs.environment }}
+      cancel-in-progress: false
+    permissions:
+      contents: read # required for actions/checkout to fetch repo contents if this repo is private
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Read the fragment
+        id: fragment
+        env:
+          FRAGMENT: ${{ inputs.fragment }}
+          SERVICES: ${{ inputs.services }}
+          STACKS: ${{ inputs.stacks }}
+        run: |
+          if [ ! -f "$FRAGMENT" ]; then
+            echo "::error::fragment $FRAGMENT not found"
+            exit 1
+          fi
+          all=$(yq -o=json '.services // {} | map_values(.image)' "$FRAGMENT")
+          if [ -z "$SERVICES" ]; then
+            SERVICES=$(jq -r 'keys_unsorted | join(" ")' <<<"$all")
+          fi
+          images='{}'
+          for service in $SERVICES; do
+            image=$(jq -r --arg s "$service" '.[$s] // ""' <<<"$all")
+            ref=${image%%@*}
+            tag=${ref##*:}
+            if [ -z "$image" ] || [ "$tag" = "$ref" ] || [[ "$tag" == */* ]]; then
+              echo "::error file=$FRAGMENT::services.$service.image must be <image>:<tag>[@sha256:<digest>], got '$image'"
+              exit 1
+            fi
+            images=$(jq -c --arg s "$service" --arg v "$tag${image#"$ref"}" '. + {($s): $v}' <<<"$images")
+          done
+          if [ "$images" = '{}' ]; then
+            echo "::error file=$FRAGMENT::no services to deploy"
+            exit 1
+          fi
+          {
+            echo "images=$images"
+            echo "stacks=$(jq -cn --arg s "$STACKS" '$s | split(" ") | map(select(. != ""))')"
+          } >>"$GITHUB_OUTPUT"
+          echo "Deploying $images to $STACKS"
+      - name: Set up ssh for the deploy gateway
+        id: ssh
+        uses: $/actions/ssh-setup
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          user: ${{ secrets.SSH_USER }}
+          known-hosts: ${{ secrets.SSH_KNOWN_HOSTS }}
+          private-key: ${{ secrets.SSH_DEPLOY_KEY }}
+      - name: Deploy
+        uses: $/actions/ssh-deploy
+        with:
+          config: ${{ steps.ssh.outputs.config }}
+          stacks: ${{ steps.fragment.outputs.stacks }}
+          images: ${{ steps.fragment.outputs.images }}

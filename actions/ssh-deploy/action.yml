@@ -12,8 +12,9 @@ inputs:
     description: 'JSON object service -> "tag@sha256:digest", deployed in this order, e.g. {"server": "sha-1a2b3c4@sha256:…", "client": "…"}'
     required: true
   token:
-    description: Token with packages read; piped to the gateway so the host can pull
-    required: true
+    description: Token with packages read; piped to the gateway so the host can pull (empty for public images)
+    required: false
+    default: ""
 
 runs:
   using: composite
